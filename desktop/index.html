@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="tr">
+	<head>
+		<meta charset="UTF-8" />
+		<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src https://generativelanguage.googleapis.com; img-src 'self' data:;" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Gemini Ekran Yakalama</title>
+		<link rel="stylesheet" href="./src/styles.css" />
+	</head>
+	<body>
+		<main class="shell">
+			<section class="hero">
+				<p class="eyebrow">Windows ekran aracı</p>
+				<h1>Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
+				<p class="lede">
+					İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra: X veya Enter ile Gemini'a, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna basın. Q ile çık.
+				</p>
+			</section>
+
+			<section class="card grid">
+				<label class="span-2">
+					<span>Gemini için kısa not</span>
+					<textarea id="prompt" rows="3" placeholder="İstersen görüntüyle birlikte kullanılacak kısa bir not yaz."></textarea>
+				</label>
+
+				<label>
+					<span>Supabase URL</span>
+					<input type="text" id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
+				</label>
+
+				<label>
+					<span>Supabase Anon/Service Key</span>
+					<input type="password" id="supabaseKey" placeholder="Anon veya Service Key" />
+				</label>
+
+				<label class="span-2">
+					<span>Supabase Bucket Name</span>
+					<input type="text" id="supabaseBucket" placeholder="screenshots" />
+				</label>
+
+				<div class="qr-container span-2" style="display: flex; flex-direction: column; align-items: center; margin-top: 10px; gap: 8px;">
+					<span style="font-size: 12px; color: #94a3b8;">Telefonda Ayarlardan QR ile Eşitlemek İçin:</span>
+					<img id="qrCodeImage" style="width: 140px; height: 140px; display: none; border-radius: 8px; border: 4px solid white;" />
+				</div>
+
+				<div class="actions span-2">
+					<button id="saveSettings">Ayarları kaydet</button>
+				</div>
+			</section>
+
+			<section class="card status-card">
+				<div class="status-line">
+					<span>Durum</span>
+					<strong id="status">Hazır</strong>
+				</div>
+				<pre id="response" class="response">Gemini cevabı burada görünecek.</pre>
+			</section>
+		</main>
+
+		<script src="./src/renderer.js"></script>
+	</body>
+</html>

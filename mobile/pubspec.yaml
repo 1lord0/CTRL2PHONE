@@ -1,0 +1,40 @@
+name: ctrl2phone_mobile
+description: "Ctrl2Phone mobile companion app — view and download screenshots from Supabase to your phone gallery."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Supabase client
+  supabase_flutter: ^2.8.0
+
+  # Gallery save
+  gal: ^2.3.2
+
+  # Network image caching
+  cached_network_image: ^3.4.1
+
+  # Fullscreen zoom + swipe
+  photo_view: ^0.15.0
+
+  # HTTP client
+  http: ^1.2.2
+
+  # Local settings persistence
+  shared_preferences: ^2.3.3
+
+  # QR code scanning
+  mobile_scanner: ^7.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

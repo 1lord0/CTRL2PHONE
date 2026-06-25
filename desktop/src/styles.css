@@ -1,0 +1,238 @@
+:root {
+  color-scheme: dark;
+  --bg: #08111f;
+  --panel: rgba(10, 18, 34, 0.88);
+  --panel-border: rgba(148, 187, 255, 0.16);
+  --text: #e5eefc;
+  --muted: #89a1c7;
+  --accent: #4f8cff;
+  --accent-strong: #2d6df6;
+  --glow: rgba(79, 140, 255, 0.24);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(79, 140, 255, 0.18), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(49, 217, 182, 0.1), transparent 28%),
+    var(--bg);
+  color: var(--text);
+}
+
+html.overlay-html,
+body.overlay-body {
+  background: transparent !important;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.shell {
+  width: min(1120px, calc(100vw - 48px));
+  margin: 0 auto;
+  padding: 40px 0 48px;
+}
+
+.hero {
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 5vw, 4.2rem);
+  line-height: 0.96;
+}
+
+.lede {
+  max-width: 760px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 22px;
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+}
+
+label span,
+.status-line span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid rgba(137, 161, 199, 0.24);
+  border-radius: 16px;
+  background: rgba(3, 8, 18, 0.72);
+  color: var(--text);
+  padding: 14px 16px;
+  font: inherit;
+  outline: none;
+}
+
+input:focus,
+textarea:focus {
+  border-color: rgba(79, 140, 255, 0.8);
+  box-shadow: 0 0 0 4px var(--glow);
+}
+
+textarea {
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+button {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 18px;
+  color: #07111f;
+  background: linear-gradient(180deg, #d9e7ff, #9ec0ff);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.secondary {
+  color: var(--text);
+  background: rgba(137, 161, 199, 0.14);
+  border: 1px solid rgba(137, 161, 199, 0.24);
+}
+
+button.secondary:hover,
+button.accent:hover,
+button:hover {
+  filter: brightness(1.06);
+}
+
+button.accent {
+  color: white;
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 16px 36px rgba(45, 109, 246, 0.28);
+}
+
+.status-card {
+  margin-top: 18px;
+  padding: 22px;
+}
+
+.status-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.response {
+  min-height: 180px;
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: #d9e7ff;
+}
+
+.overlay-body {
+  background: transparent;
+  overflow: hidden;
+  cursor: none;
+}
+
+.overlay-html .overlay-body {
+  background: transparent !important;
+}
+
+.overlay-instructions {
+  position: fixed;
+  left: 24px;
+  top: 18px;
+  z-index: 2;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(3, 8, 18, 0.72);
+  border: 1px solid rgba(137, 161, 199, 0.24);
+  color: var(--text);
+  font-size: 0.95rem;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.24);
+}
+
+.blue-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(112, 181, 255, 0.95);
+  box-shadow:
+    0 0 0 8px rgba(79, 140, 255, 0.16),
+    0 0 26px rgba(79, 140, 255, 0.58);
+  background: rgba(97, 165, 255, 0.18);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.selection-box {
+  position: fixed;
+  border: 2px solid rgba(119, 188, 255, 0.98);
+  background: rgba(79, 140, 255, 0.18);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .shell {
+    width: min(100vw - 28px, 1120px);
+    padding-top: 20px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

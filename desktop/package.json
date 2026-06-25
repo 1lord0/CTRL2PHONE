@@ -1,0 +1,32 @@
+{
+  "name": "ctrl2phone",
+  "version": "1.0.0",
+  "description": "Capture any area of your screen with Double Ctrl, send it to Gemini Web or directly to your phone via Supabase.",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "keywords": [
+    "screenshot",
+    "electron",
+    "supabase",
+    "screen-capture",
+    "gemini",
+    "mobile-sync"
+  ],
+  "author": "Eren",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1lord0/ctrl2phone"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "screenshot-desktop": "^1.15.1"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0"
+  }
+}
