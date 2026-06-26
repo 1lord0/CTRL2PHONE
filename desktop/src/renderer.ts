@@ -1,12 +1,12 @@
-'use strict';
-const promptInput = document.getElementById('prompt');
-const supabaseUrlInput = document.getElementById('supabaseUrl');
-const supabaseKeyInput = document.getElementById('supabaseKey');
-const supabaseBucketInput = document.getElementById('supabaseBucket');
-const statusNode = document.getElementById('status');
-const responseNode = document.getElementById('response');
-const qrCodeImage = document.getElementById('qrCodeImage');
-async function updateQrCode() {
+const promptInput = document.getElementById('prompt') as HTMLTextAreaElement;
+const supabaseUrlInput = document.getElementById('supabaseUrl') as HTMLInputElement;
+const supabaseKeyInput = document.getElementById('supabaseKey') as HTMLInputElement;
+const supabaseBucketInput = document.getElementById('supabaseBucket') as HTMLInputElement;
+const statusNode = document.getElementById('status') as HTMLElement;
+const responseNode = document.getElementById('response') as HTMLElement;
+const qrCodeImage = document.getElementById('qrCodeImage') as HTMLImageElement;
+
+async function updateQrCode(): Promise<void> {
   try {
     const result = await window.bridge.generateQr();
     if (result?.ok && result.dataUrl) {
@@ -20,7 +20,8 @@ async function updateQrCode() {
     qrCodeImage.style.display = 'none';
   }
 }
-function loadSettings(state) {
+
+function loadSettings(state: any): void {
   promptInput.value = state.prompt || '';
   supabaseUrlInput.value = state.supabaseUrl || '';
   supabaseKeyInput.value = state.supabaseKey || '';
@@ -28,19 +29,24 @@ function loadSettings(state) {
   statusNode.textContent = state.selectionActive ? 'Seçim modu açık' : 'Hazır';
   updateQrCode();
 }
+
 window.bridge.ready().then(loadSettings);
+
 window.bridge.onStatus((message) => {
   statusNode.textContent = message;
 });
+
 window.bridge.onResponse((message) => {
   responseNode.textContent = message;
 });
+
 window.bridge.onOverlayMessage((message) => {
   const overlayText = document.getElementById('overlayText');
   if (overlayText) {
     overlayText.textContent = message;
   }
 });
+
 document.getElementById('saveSettings')?.addEventListener('click', async () => {
   const payload = {
     prompt: promptInput.value.trim(),
@@ -48,7 +54,9 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
     supabaseKey: supabaseKeyInput.value.trim(),
     supabaseBucket: supabaseBucketInput.value.trim() || 'screenshots',
   };
+
   const result = await window.bridge.saveSettings(payload);
+
   if (result?.ok) {
     statusNode.textContent = 'Ayarlar kaydedildi';
     updateQrCode();

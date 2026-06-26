@@ -1,44 +1,58 @@
-'use strict';
-const selectionBox = document.getElementById('selectionBox');
-const overlayText = document.getElementById('overlayText');
+const selectionBox = document.getElementById('selectionBox') as HTMLElement;
+const overlayText = document.getElementById('overlayText') as HTMLElement;
+
 let active = false;
 let dragging = false;
-let startPoint = null;
-let currentRect = null;
-function renderSelection(rect) {
+let startPoint: { x: number; y: number } | null = null;
+let currentRect: { x: number; y: number; width: number; height: number } | null = null;
+
+function renderSelection(
+  rect: { x: number; y: number; width: number; height: number } | null
+): void {
   if (!rect) {
     selectionBox.classList.add('hidden');
     return;
   }
+
   selectionBox.classList.remove('hidden');
   selectionBox.style.left = `${rect.x}px`;
   selectionBox.style.top = `${rect.y}px`;
   selectionBox.style.width = `${rect.width}px`;
   selectionBox.style.height = `${rect.height}px`;
 }
-function updateRect(endPoint) {
+
+function updateRect(endPoint: {
+  x: number;
+  y: number;
+}): { x: number; y: number; width: number; height: number } | null {
   if (!startPoint) {
     return null;
   }
+
   const x = Math.min(startPoint.x, endPoint.x);
   const y = Math.min(startPoint.y, endPoint.y);
   const width = Math.abs(endPoint.x - startPoint.x);
   const height = Math.abs(endPoint.y - startPoint.y);
+
   return { x, y, width, height };
 }
+
 window.addEventListener('mousemove', (event) => {
   if (!active) {
     return;
   }
+
   if (dragging) {
     currentRect = updateRect({ x: event.clientX, y: event.clientY });
     renderSelection(currentRect);
   }
 });
+
 window.addEventListener('mousedown', (event) => {
   if (!active || event.button !== 0) {
     return;
   }
+
   dragging = true;
   startPoint = { x: event.clientX, y: event.clientY };
   currentRect = { x: startPoint.x, y: startPoint.y, width: 0, height: 0 };
@@ -46,13 +60,16 @@ window.addEventListener('mousedown', (event) => {
   renderSelection(currentRect);
   window.bridge.setSelection({ type: 'start' });
 });
+
 window.addEventListener('mouseup', async (event) => {
   if (!active || event.button !== 0 || !dragging) {
     return;
   }
+
   dragging = false;
   currentRect = updateRect({ x: event.clientX, y: event.clientY });
   renderSelection(currentRect);
+
   if (currentRect && currentRect.width > 4 && currentRect.height > 4) {
     await window.bridge.setSelection({ type: 'update', rect: currentRect });
     overlayText.textContent = 'Seçim hazır. X veya Enter ile gönder, Esc ile iptal et.';
@@ -63,21 +80,26 @@ window.addEventListener('mouseup', async (event) => {
     overlayText.textContent = 'En az bir alan seç';
   }
 });
+
 window.addEventListener('contextmenu', (event) => {
   event.preventDefault();
 });
+
 window.bridge.onOverlayState((state) => {
   active = Boolean(state?.active);
   selectionBox.classList.toggle('hidden', !state?.visible);
+
   if (state?.backgroundImage) {
     document.body.style.backgroundImage = `url("${state.backgroundImage}")`;
   } else {
     document.body.style.backgroundImage = 'none';
   }
+
   if (!active) {
     dragging = false;
     startPoint = null;
   }
+
   if (state?.selection) {
     currentRect = state.selection;
     renderSelection(currentRect);
@@ -86,6 +108,7 @@ window.bridge.onOverlayState((state) => {
     renderSelection(null);
   }
 });
+
 window.bridge.onOverlayMessage((message) => {
   overlayText.textContent = message;
 });

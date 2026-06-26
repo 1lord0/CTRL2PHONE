@@ -1,15 +1,21 @@
-const { contextBridge, ipcRenderer } = require('electron');
-
-contextBridge.exposeInMainWorld('bridge', {
-  ready: () => ipcRenderer.invoke('app-ready'),
-  saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
-  generateQr: () => ipcRenderer.invoke('generate-qr'),
-  captureNow: () => ipcRenderer.invoke('capture-now'),
-  openGemini: () => ipcRenderer.invoke('open-gemini'),
-  setSelection: (payload) => ipcRenderer.invoke('set-selection', payload),
-  cancelSelection: () => ipcRenderer.invoke('cancel-selection'),
-  onStatus: (callback) => ipcRenderer.on('status', (_, message) => callback(message)),
-  onResponse: (callback) => ipcRenderer.on('response', (_, message) => callback(message)),
-  onOverlayState: (callback) => ipcRenderer.on('overlay-state', (_, state) => callback(state)),
-  onOverlayMessage: (callback) => ipcRenderer.on('overlay-message', (_, message) => callback(message)),
-});
+'use strict';
+Object.defineProperty(exports, '__esModule', { value: true });
+const electron_1 = require('electron');
+const bridge = {
+  ready: () => electron_1.ipcRenderer.invoke('app-ready'),
+  saveSettings: (settings) => electron_1.ipcRenderer.invoke('save-settings', settings),
+  generateQr: () => electron_1.ipcRenderer.invoke('generate-qr'),
+  captureNow: () => electron_1.ipcRenderer.invoke('capture-now'),
+  openGemini: () => electron_1.ipcRenderer.invoke('open-gemini'),
+  focusGemini: () => electron_1.ipcRenderer.invoke('focus-gemini'),
+  setSelection: (payload) => electron_1.ipcRenderer.invoke('set-selection', payload),
+  cancelSelection: () => electron_1.ipcRenderer.invoke('cancel-selection'),
+  onStatus: (callback) => electron_1.ipcRenderer.on('status', (_, message) => callback(message)),
+  onResponse: (callback) =>
+    electron_1.ipcRenderer.on('response', (_, message) => callback(message)),
+  onOverlayState: (callback) =>
+    electron_1.ipcRenderer.on('overlay-state', (_, state) => callback(state)),
+  onOverlayMessage: (callback) =>
+    electron_1.ipcRenderer.on('overlay-message', (_, message) => callback(message)),
+};
+electron_1.contextBridge.exposeInMainWorld('bridge', bridge);

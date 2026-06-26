@@ -10,6 +10,9 @@ desktop/settings.json
 # Compiled key listener (users should build from source)
 desktop/src/key_listener.exe
 
+# Compiled TypeScript output (do not commit)
+desktop/src/*.js
+
 # Personal launcher scripts
 *.bat
 *.vbs

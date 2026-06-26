@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/supabase_service.dart';
+import 'providers/photos_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Kalıcı ayarları kontrol et
   final prefs = await SharedPreferences.getInstance();
   final url = prefs.getString('supabase_url');
   final key = prefs.getString('supabase_anon_key');
@@ -32,26 +33,31 @@ class PhoneApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Phone Gallery',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          brightness: Brightness.light,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => PhotosProvider()),
+      ],
+      child: MaterialApp(
+        title: 'Phone Gallery',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.indigo,
+            brightness: Brightness.light,
+          ),
+          useMaterial3: true,
         ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          brightness: Brightness.dark,
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.indigo,
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
         ),
-        useMaterial3: true,
+        home: isInitialized
+            ? const HomeScreen()
+            : const SettingsScreen(isInitialSetup: true),
       ),
-      home: isInitialized 
-          ? const HomeScreen() 
-          : const SettingsScreen(isInitialSetup: true),
     );
   }
 }

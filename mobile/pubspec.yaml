@@ -10,6 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # State management
+  provider: ^6.1.0
+
   # Supabase client
   supabase_flutter: ^2.8.0
 

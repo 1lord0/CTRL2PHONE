@@ -11,9 +11,13 @@
 [![Flutter](https://img.shields.io/badge/Flutter-Mobile_App-02569B?logo=flutter)](https://flutter.dev/)
 [![Supabase](https://img.shields.io/badge/Supabase-Storage-3ECF8E?logo=supabase)](https://supabase.com/)
 
+<br>
+<img src="assets/demo_preview.png" alt="Ctrl2Phone Mockup" width="70%">
+
 </div>
 
 ---
+
 
 ## 🇬🇧 English
 
@@ -103,6 +107,28 @@ flutter run
 - **Supabase** account (free tier: [supabase.com](https://supabase.com))
 - **Flutter** 3.x (for mobile app)
 
+### 🔨 Building the C# Key Listener
+
+The global hotkey listener is a small C# Windows app that must be compiled before running:
+
+```powershell
+# From the desktop/src directory
+cd ctrl2phone/desktop/src
+
+# Using csc (C# compiler) — included with Windows SDK or Visual Studio
+csc /target:winexe /out:key_listener.exe key_listener.cs
+
+# Or using dotnet CLI (if you have .NET SDK installed)
+dotnet build -c Release -o . key_listener.cs
+```
+
+> ⚠️ **Do not commit `key_listener.exe` to Git.** It is already listed in `.gitignore`.
+
+### 🔒 Security Notes
+
+- **Use your Supabase Anon Key**, not the Service Key. The Service Key bypasses Row Level Security (RLS) and should never be distributed in client applications.
+- Make sure your Supabase Storage bucket has **RLS policies enabled** for anonymous uploads. See [Supabase RLS docs](https://supabase.com/docs/guides/storage/security/access-control) for setup.
+
 ### 🔧 Supabase Setup
 
 1. Create a new project at [supabase.com](https://supabase.com)
@@ -144,13 +170,27 @@ npm start
 2. **"Ayarları kaydet"** butonuna tıklayın
 3. Herhangi bir yerde **sol Ctrl'e iki kere** basın → alan seçin → **X** (Gemini) veya **M** (Telefon)
 
-#### Mobil Uygulama (Flutter)
+#### Mobil Uygulama (Flutter — Android & iOS)
 
 ```bash
 cd ctrl2phone/mobile
 flutter pub get
+```
+
+**Android:**
+```bash
 flutter run
 ```
+
+**iOS (macOS + Xcode gerektirir):**
+```bash
+cd ios
+pod install
+cd ..
+flutter run
+```
+
+> **iOS Release Build:** Code signing gereklidir. `flutter build ipa --release` komutunu kullanmadan önce Apple Developer hesabı, sertifika ve provisioning profile ayarlamalısınız. Detaylar için [Flutter iOS deployment docs](https://docs.flutter.dev/deployment/ios) bakın.
 
 1. Uygulamayı açın → Ayarlar'dan **QR Tara** butonuna dokunun
 2. Masaüstü uygulamasında görünen QR kodu tarayın
@@ -163,6 +203,27 @@ flutter run
 3. Bucket'ı **Public** yapın
 4. Settings → API'den **Project URL** ve **anon key** değerlerini kopyalayın
 5. Ctrl2Phone masaüstü uygulamasına yapıştırın
+
+### 🔨 C# Key Listener Derleme
+
+Global kısayol dinleyicisi, çalıştırılmadan önce derlenmesi gereken küçük bir C# Windows uygulamasıdır:
+
+```powershell
+cd ctrl2phone/desktop/src
+
+# csc kullanarak (Windows SDK veya Visual Studio ile gelir)
+csc /target:winexe /out:key_listener.exe key_listener.cs
+
+# veya dotnet CLI ile (.NET SDK kuruluysa)
+dotnet build -c Release -o . key_listener.cs
+```
+
+> ⚠️ **`key_listener.exe`'yi Git'e commit etmeyin.** `.gitignore`'da zaten listelenmiştir.
+
+### 🔒 Güvenlik Notları
+
+- **Supabase Service Key yerine Anon Key kullanın.** Service Key, Row Level Security (RLS) kurallarını bypass eder ve client uygulamalarda asla kullanılmamalıdır.
+- Supabase Storage bucket'ınızda anonim yükleme için **RLS politikaları** aktif olduğundan emin olun. Detaylar için [Supabase RLS dokümanlarına](https://supabase.com/docs/guides/storage/security/access-control) bakın.
 
 ---
 
@@ -191,7 +252,7 @@ ctrl2phone/
 │   │   ├── overlay.css     # Overlay styles
 │   │   ├── styles.css      # Main window styles
 │   │   ├── key_listener.cs # C# global keyboard hook source
-│   │   └── key_listener.exe# Compiled key listener (build yourself)
+│   │   └── key_listener.exe# Build from source (see instructions below)
 │   ├── index.html          # Main window
 │   └── package.json
 ├── mobile/                 # Flutter mobile app

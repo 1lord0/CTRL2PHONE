@@ -1,19 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/supabase_service.dart';
+import '../providers/photos_provider.dart';
 import '../widgets/photo_card.dart';
 import 'detail_screen.dart';
 import 'settings_screen.dart';
-
-// ============================================================
-// Home Screen: Telefon Ana Ekranı — 3 Sütun Grid
-// ============================================================
-// • Fotoğraflar Supabase'den çekilir
-// • 3 sütunlu grid görünümü
-// • Pull-to-refresh desteği
-// • Fotoğraf tıklama → DetailScreen (tam ekran + swipe)
-// • Infinite scroll desteği (opsiyonel, basit tutuldu)
-// ============================================================
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,52 +15,41 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final SupabaseService _service = SupabaseService();
-
-  List<Photo> _photos = [];
-  bool _isLoading = false;
-  bool _isRefreshing = false;
-  String? _error;
+  late final ScrollController _scrollController;
 
   @override
   void initState() {
     super.initState();
-    _loadPhotos();
+    _scrollController = ScrollController();
+    _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<PhotosProvider>().loadPhotos();
+    });
   }
 
-  // --- Veri Yükleme ---
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
-  Future<void> _loadPhotos() async {
-    if (_isLoading) return;
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    try {
-      final photos = await _service.getPhotos(limit: 50);
-      setState(() => _photos = photos);
-    } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      setState(() => _isLoading = false);
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      context.read<PhotosProvider>().loadMore();
     }
   }
 
   Future<void> _onRefresh() async {
-    setState(() => _isRefreshing = true);
-    await _loadPhotos();
-    setState(() => _isRefreshing = false);
+    await context.read<PhotosProvider>().refresh();
   }
 
-  // --- Navigation ---
-
-  void _onPhotoTap(int index) {
+  void _onPhotoTap(List<Photo> photos, int index) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => DetailScreen(
-          photos: _photos,
+          photos: photos,
           initialIndex: index,
         ),
       ),
@@ -80,7 +61,8 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Çıkış Yap'),
-        content: const Text('Supabase bağlantı bilgileri silinecek ve giriş ekranına dönülecektir. Emin misiniz?'),
+        content: const Text(
+            'Supabase bağlantı bilgileri silinecek ve giriş ekranına dönülecektir. Emin misiniz?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -106,18 +88,18 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const SettingsScreen(isInitialSetup: true)),
+          MaterialPageRoute(
+              builder: (_) => const SettingsScreen(isInitialSetup: true)),
           (route) => false,
         );
       }
     }
   }
 
-  // --- Build ---
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final provider = context.watch<PhotosProvider>();
 
     return Scaffold(
       appBar: AppBar(
@@ -127,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Yenile',
-            onPressed: _isLoading ? null : _loadPhotos,
+            onPressed: provider.isLoading ? null : () => provider.refresh(),
           ),
           IconButton(
             icon: const Icon(Icons.settings),
@@ -135,10 +117,12 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () async {
               final result = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen(isInitialSetup: false)),
+                MaterialPageRoute(
+                    builder: (_) =>
+                        const SettingsScreen(isInitialSetup: false)),
               );
               if (result == true) {
-                _loadPhotos();
+                provider.refresh();
               }
             },
           ),
@@ -149,20 +133,20 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _buildBody(theme),
+      body: _buildBody(theme, provider),
     );
   }
 
-  Widget _buildBody(ThemeData theme) {
-    // Hata durumu
-    if (_error != null && _photos.isEmpty) {
+  Widget _buildBody(ThemeData theme, PhotosProvider provider) {
+    if (provider.error != null && provider.photos.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+              Icon(Icons.error_outline,
+                  size: 48, color: theme.colorScheme.error),
               const SizedBox(height: 16),
               Text(
                 'Fotoğraflar yüklenemedi',
@@ -170,13 +154,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                _error!,
+                provider.error!,
                 textAlign: TextAlign.center,
                 style: TextStyle(color: theme.colorScheme.error),
               ),
               const SizedBox(height: 16),
               ElevatedButton.icon(
-                onPressed: _loadPhotos,
+                onPressed: () => provider.refresh(),
                 icon: const Icon(Icons.refresh),
                 label: const Text('Tekrar Dene'),
               ),
@@ -186,8 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // İlk yükleme
-    if (_isLoading && _photos.isEmpty) {
+    if (provider.isLoading && provider.photos.isEmpty) {
       return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -200,8 +183,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Boş durum
-    if (_photos.isEmpty) {
+    if (provider.photos.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
@@ -210,10 +192,10 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Grid görünümü
     return RefreshIndicator(
       onRefresh: _onRefresh,
       child: GridView.builder(
+        controller: _scrollController,
         padding: const EdgeInsets.all(4),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
@@ -221,14 +203,22 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisSpacing: 2,
           childAspectRatio: 1.0,
         ),
-        itemCount: _photos.length,
+        itemCount: provider.photos.length + (provider.isLoading && provider.photos.isNotEmpty ? 1 : 0),
         itemBuilder: (ctx, index) {
-          final photo = _photos[index];
-          final imageUrl = _service.getPhotoUrl(photo.storagePath);
+          if (index == provider.photos.length) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(12),
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            );
+          }
+          final photo = provider.photos[index];
+          final imageUrl = SupabaseService().getPhotoUrl(photo.storagePath);
 
           return PhotoCard(
             imageUrl: imageUrl,
-            onTap: () => _onPhotoTap(index),
+            onTap: () => _onPhotoTap(provider.photos, index),
           );
         },
       ),

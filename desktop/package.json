@@ -5,8 +5,12 @@
   "private": true,
   "main": "src/main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron ."
+    "start": "npm run build && electron .",
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "package": "electron-builder",
+    "lint": "eslint src/",
+    "format": "prettier --write src/"
   },
   "keywords": [
     "screenshot",
@@ -23,10 +27,19 @@
     "url": "https://github.com/1lord0/ctrl2phone"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
     "qrcode": "^1.5.4",
     "screenshot-desktop": "^1.15.1"
   },
   "devDependencies": {
-    "electron": "^35.0.0"
+    "@types/node": "^22.13.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.0",
+    "electron-updater": "^6.3.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.7.0"
   }
 }

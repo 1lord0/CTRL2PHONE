@@ -9,8 +9,11 @@ body {
   height: 100%;
   overflow: hidden;
   background: transparent;
-  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><circle cx='9' cy='9' r='7' stroke='%2370b5ff' stroke-width='2' fill='none'/></svg>") 9 9, crosshair;
-  font-family: "Segoe UI", system-ui, sans-serif;
+  cursor:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><circle cx='9' cy='9' r='7' stroke='%2370b5ff' stroke-width='2' fill='none'/></svg>")
+      9 9,
+    crosshair;
+  font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
 body.overlay-body {
@@ -33,7 +36,6 @@ body.overlay-body {
   font-size: 0.92rem;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
-
 
 .selection-box {
   position: fixed;

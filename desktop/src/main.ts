@@ -1,102 +1,60 @@
-'use strict';
-var __createBinding =
-  (this && this.__createBinding) ||
-  (Object.create
-    ? function (o, m, k, k2) {
-        if (k2 === undefined) k2 = k;
-        var desc = Object.getOwnPropertyDescriptor(m, k);
-        if (!desc || ('get' in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-          desc = {
-            enumerable: true,
-            get: function () {
-              return m[k];
-            },
-          };
-        }
-        Object.defineProperty(o, k2, desc);
-      }
-    : function (o, m, k, k2) {
-        if (k2 === undefined) k2 = k;
-        o[k2] = m[k];
-      });
-var __setModuleDefault =
-  (this && this.__setModuleDefault) ||
-  (Object.create
-    ? function (o, v) {
-        Object.defineProperty(o, 'default', { enumerable: true, value: v });
-      }
-    : function (o, v) {
-        o['default'] = v;
-      });
-var __importStar =
-  (this && this.__importStar) ||
-  (function () {
-    var ownKeys = function (o) {
-      ownKeys =
-        Object.getOwnPropertyNames ||
-        function (o) {
-          var ar = [];
-          for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-          return ar;
-        };
-      return ownKeys(o);
-    };
-    return function (mod) {
-      if (mod && mod.__esModule) return mod;
-      var result = {};
-      if (mod != null)
-        for (var k = ownKeys(mod), i = 0; i < k.length; i++)
-          if (k[i] !== 'default') __createBinding(result, mod, k[i]);
-      __setModuleDefault(result, mod);
-      return result;
-    };
-  })();
-var __importDefault =
-  (this && this.__importDefault) ||
-  function (mod) {
-    return mod && mod.__esModule ? mod : { default: mod };
-  };
-Object.defineProperty(exports, '__esModule', { value: true });
-const electron_1 = require('electron');
-const path = __importStar(require('path'));
-const child_process_1 = require('child_process');
-const fs = __importStar(require('fs'));
-const screenshot_desktop_1 = __importDefault(require('screenshot-desktop'));
-const qrcode_1 = __importDefault(require('qrcode'));
-const supabase_js_1 = require('@supabase/supabase-js');
-const electron_updater_1 = require('electron-updater');
-electron_1.app.disableHardwareAcceleration();
-electron_1.app.commandLine.appendSwitch('disable-gpu');
-let mainWindow = null;
-let overlayWindow = null;
-let geminiWindow = null;
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  ipcMain,
+  nativeImage,
+  safeStorage,
+  screen,
+  Display,
+} from 'electron';
+import * as path from 'path';
+import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import screenshot from 'screenshot-desktop';
+import QRCode from 'qrcode';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { autoUpdater } from 'electron-updater';
+import { AppSettings, Rect } from './types';
+
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+
+let mainWindow: BrowserWindow | null = null;
+let overlayWindow: BrowserWindow | null = null;
+let geminiWindow: BrowserWindow | null = null;
 let selectionActive = false;
-let selectionRect = null;
-let selectionDisplay = null;
-let capturedScreenImage = null;
-let keyListenerProcess = null;
-let supabaseClient = null;
+let selectionRect: Rect | null = null;
+let selectionDisplay: Display | null = null;
+let capturedScreenImage: Electron.NativeImage | null = null;
+let keyListenerProcess: ChildProcess | null = null;
+let supabaseClient: SupabaseClient | null = null;
 let supabaseClientUrl = '';
-const settings = {
+
+const settings: AppSettings = {
   prompt: 'Bu ekran görüntüsünü analiz et ve kısa bir özet ver.',
   supabaseUrl: '',
   supabaseKey: '',
   supabaseBucket: 'screenshots',
 };
+
 const geminiUrl = 'https://gemini.google.com/app';
-let settingsPath;
-function loadSettingsFromFile() {
+
+let settingsPath: string | undefined;
+
+function loadSettingsFromFile(): void {
   try {
-    settingsPath = path.join(electron_1.app.getPath('userData'), 'settings.json');
+    settingsPath = path.join(app.getPath('userData'), 'settings.json');
     if (fs.existsSync(settingsPath)) {
       const data = fs.readFileSync(settingsPath, 'utf8');
-      const loaded = JSON.parse(data);
+      const loaded = JSON.parse(data) as Partial<AppSettings>;
       Object.assign(settings, loaded);
+
       // Decrypt supabaseKey if it was encrypted with safeStorage
-      if (settings.supabaseKey && electron_1.safeStorage.isEncryptionAvailable()) {
+      if (settings.supabaseKey && safeStorage.isEncryptionAvailable()) {
         try {
           const encrypted = Buffer.from(settings.supabaseKey, 'base64');
-          settings.supabaseKey = electron_1.safeStorage.decryptString(encrypted);
+          settings.supabaseKey = safeStorage.decryptString(encrypted);
         } catch (e) {
           console.warn(
             'Supabase key decryption failed, treating as plain text (backward compat):',
@@ -105,6 +63,7 @@ function loadSettingsFromFile() {
           // If decryption fails, key might already be plain text (backward compat)
         }
       }
+
       console.log('Ayarlar dosyadan yüklendi:', settingsPath);
     } else {
       console.log('Ayarlar dosyası bulunamadı, varsayılanlar kullanılacak.');
@@ -113,46 +72,54 @@ function loadSettingsFromFile() {
     console.error('Ayarlar yüklenirken hata oluştu:', error);
   }
 }
-function saveSettingsToFile() {
+
+function saveSettingsToFile(): void {
   try {
     if (!settingsPath) {
-      settingsPath = path.join(electron_1.app.getPath('userData'), 'settings.json');
+      settingsPath = path.join(app.getPath('userData'), 'settings.json');
     }
+
     const settingsToSave = { ...settings };
-    if (settings.supabaseKey && electron_1.safeStorage.isEncryptionAvailable()) {
-      const encrypted = electron_1.safeStorage.encryptString(settings.supabaseKey);
+    if (settings.supabaseKey && safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(settings.supabaseKey);
       settingsToSave.supabaseKey = encrypted.toString('base64');
     }
+
     fs.writeFileSync(settingsPath, JSON.stringify(settingsToSave, null, 2), 'utf8');
     console.log('Ayarlar dosyaya kaydedildi:', settingsPath);
   } catch (error) {
     console.error('Ayarlar kaydedilirken hata oluştu:', error);
   }
 }
-function handleKeyAction(key) {
+
+function handleKeyAction(key: string): boolean {
   const normalizedKey = String(key || '').toUpperCase();
   if (normalizedKey === 'Q') {
-    electron_1.app.quit();
+    app.quit();
     return true;
   }
   return false;
 }
-function attachKeyHandlers(windowInstance) {
+
+function attachKeyHandlers(windowInstance: BrowserWindow): void {
   if (!windowInstance || windowInstance.isDestroyed()) {
     return;
   }
+
   windowInstance.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') {
       return;
     }
+
     const handled = handleKeyAction(input.key);
     if (handled) {
       event.preventDefault();
     }
   });
 }
-function createMainWindow() {
-  mainWindow = new electron_1.BrowserWindow({
+
+function createMainWindow(): void {
+  mainWindow = new BrowserWindow({
     width: 1120,
     height: 820,
     minWidth: 900,
@@ -166,15 +133,18 @@ function createMainWindow() {
       nodeIntegration: false,
     },
   });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
     mainWindow?.focus();
   });
-  mainWindow.loadFile(path.join(electron_1.app.getAppPath(), 'index.html'));
+
+  mainWindow.loadFile(path.join(app.getAppPath(), 'index.html'));
   attachKeyHandlers(mainWindow);
 }
-function getVirtualBounds() {
-  const displays = electron_1.screen.getAllDisplays();
+
+function getVirtualBounds(): Rect {
+  const displays = screen.getAllDisplays();
   const bounds = displays.reduce(
     (acc, display) => ({
       x: Math.min(acc.x, display.bounds.x),
@@ -189,6 +159,7 @@ function getVirtualBounds() {
       bottom: displays[0].bounds.y + displays[0].bounds.height,
     }
   );
+
   return {
     x: bounds.x,
     y: bounds.y,
@@ -196,9 +167,11 @@ function getVirtualBounds() {
     height: bounds.bottom - bounds.y,
   };
 }
-function createOverlayWindow() {
+
+function createOverlayWindow(): void {
   const bounds = getVirtualBounds();
-  overlayWindow = new electron_1.BrowserWindow({
+
+  overlayWindow = new BrowserWindow({
     x: bounds.x,
     y: bounds.y,
     width: bounds.width,
@@ -220,16 +193,19 @@ function createOverlayWindow() {
       nodeIntegration: false,
     },
   });
+
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-  overlayWindow.loadFile(path.join(electron_1.app.getAppPath(), 'src', 'overlay.html'));
+  overlayWindow.loadFile(path.join(app.getAppPath(), 'src', 'overlay.html'));
   attachKeyHandlers(overlayWindow);
 }
-function createGeminiWindow() {
+
+function createGeminiWindow(): BrowserWindow {
   if (geminiWindow && !geminiWindow.isDestroyed()) {
     return geminiWindow;
   }
-  geminiWindow = new electron_1.BrowserWindow({
+
+  geminiWindow = new BrowserWindow({
     width: 1280,
     height: 900,
     show: false,
@@ -241,40 +217,52 @@ function createGeminiWindow() {
       partition: 'persist:gemini',
     },
   });
+
   geminiWindow.on('close', (event) => {
-    if (!electron_1.app.isQuitting) {
+    if (!(app as any).isQuitting) {
       event.preventDefault();
       geminiWindow?.hide();
     }
   });
+
   geminiWindow.on('closed', () => {
     geminiWindow = null;
   });
+
   attachKeyHandlers(geminiWindow);
+
   return geminiWindow;
 }
-async function openGeminiWindow() {
+
+async function openGeminiWindow(): Promise<BrowserWindow> {
   const windowInstance = createGeminiWindow();
+
   if (windowInstance.webContents.getURL() !== geminiUrl) {
     await windowInstance.loadURL(geminiUrl);
   }
+
   if (windowInstance.isMinimized()) {
     windowInstance.restore();
   }
+
   windowInstance.setAlwaysOnTop(true);
   windowInstance.show();
   windowInstance.focus();
   windowInstance.setAlwaysOnTop(false);
   return windowInstance;
 }
-async function ensureGeminiWindowLoaded() {
+
+async function ensureGeminiWindowLoaded(): Promise<BrowserWindow> {
   const windowInstance = createGeminiWindow();
+
   if (windowInstance.webContents.getURL() !== geminiUrl) {
     await windowInstance.loadURL(geminiUrl);
   }
+
   return windowInstance;
 }
-async function focusGeminiComposer(windowInstance) {
+
+async function focusGeminiComposer(windowInstance: BrowserWindow): Promise<boolean> {
   const focused = await windowInstance.webContents.executeJavaScript(`
     (() => {
       const selectors = ['textarea', 'input[type="text"]', '[contenteditable="true"]'];
@@ -287,28 +275,34 @@ async function focusGeminiComposer(windowInstance) {
       return false;
     })();
   `);
+
   return Boolean(focused);
 }
-function sendPasteShortcut(windowInstance) {
+
+function sendPasteShortcut(windowInstance: BrowserWindow): void {
   windowInstance.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['ctrl'] });
   windowInstance.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: ['ctrl'] });
 }
-function setStatus(message) {
+
+function setStatus(message: string): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('status', message);
   }
 }
-function setResponse(message) {
+
+function setResponse(message: string): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('response', message);
   }
 }
-function sendOverlayState(state) {
+
+function sendOverlayState(state: any): void {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send('overlay-state', state);
   }
 }
-function showSelectionOverlay(backgroundImagePath, bounds) {
+
+function showSelectionOverlay(backgroundImagePath: string, bounds: Rect): void {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.setIgnoreMouseEvents(false);
     if (bounds) {
@@ -327,19 +321,22 @@ function showSelectionOverlay(backgroundImagePath, bounds) {
     }, 30);
   }
 }
-function hideSelectionOverlay() {
+
+function hideSelectionOverlay(): void {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
     sendOverlayState({ visible: false, active: false, selection: null, backgroundImage: null });
     overlayWindow.hide();
   }
 }
-function setSelectionInstruction(message) {
+
+function setSelectionInstruction(message: string): void {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send('overlay-message', message);
   }
 }
-function resetSelectionSession() {
+
+function resetSelectionSession(): void {
   selectionActive = false;
   selectionRect = null;
   selectionDisplay = null;
@@ -348,35 +345,39 @@ function resetSelectionSession() {
     keyListenerProcess.stdin?.write('INACTIVE\n');
   }
 }
-async function startSelectionSession() {
+
+async function startSelectionSession(): Promise<void> {
   try {
-    const cursorPoint = electron_1.screen.getCursorScreenPoint();
-    const activeDisplay = electron_1.screen.getDisplayNearestPoint(cursorPoint);
+    const cursorPoint = screen.getCursorScreenPoint();
+    const activeDisplay = screen.getDisplayNearestPoint(cursorPoint);
     selectionDisplay = activeDisplay;
-    const imageBuffer = await (0, screenshot_desktop_1.default)({
-      format: 'png',
-      screen: activeDisplay.id,
-    });
-    capturedScreenImage = electron_1.nativeImage.createFromBuffer(
+
+    const imageBuffer = await screenshot({ format: 'png', screen: activeDisplay.id });
+    capturedScreenImage = nativeImage.createFromBuffer(
       Buffer.isBuffer(imageBuffer) ? imageBuffer : Buffer.from(imageBuffer)
     );
+
     const base64 = capturedScreenImage.toJPEG(85).toString('base64');
     const dataUrl = `data:image/jpeg;base64,${base64}`;
+
     selectionActive = true;
     if (keyListenerProcess && !keyListenerProcess.killed) {
       keyListenerProcess.stdin?.write('ACTIVE\n');
     }
     selectionRect = null;
+
     showSelectionOverlay(dataUrl, activeDisplay.bounds);
     setSelectionInstruction('Alanı fareyle seç, sonra X veya Enter ile gönder, Esc ile iptal et.');
     setStatus('Seçim modu açık. Alanı fareyle çiz.');
-  } catch (error) {
+  } catch (error: any) {
     console.error('Ekran yakalama hatası:', error);
     setStatus('Ekran yakalama başlatılamadı: ' + error.message);
   }
 }
-function toAbsoluteRect(rect) {
+
+function toAbsoluteRect(rect: Rect): Rect {
   const bounds = getVirtualBounds();
+
   return {
     x: rect.x + bounds.x,
     y: rect.y + bounds.y,
@@ -384,11 +385,13 @@ function toAbsoluteRect(rect) {
     height: rect.height,
   };
 }
-function clampRectToDisplay(rect, displayBounds) {
+
+function clampRectToDisplay(rect: Rect, displayBounds: Rect): Rect {
   const x = Math.max(rect.x, displayBounds.x);
   const y = Math.max(rect.y, displayBounds.y);
   const right = Math.min(rect.x + rect.width, displayBounds.x + displayBounds.width);
   const bottom = Math.min(rect.y + rect.height, displayBounds.y + displayBounds.height);
+
   return {
     x,
     y,
@@ -396,7 +399,12 @@ function clampRectToDisplay(rect, displayBounds) {
     height: Math.max(0, bottom - y),
   };
 }
-function cropImageToSelection(image, rect, display) {
+
+function cropImageToSelection(
+  image: Electron.NativeImage,
+  rect: Rect,
+  display: Display
+): Electron.NativeImage {
   const scaleFactor = display.scaleFactor || 1;
   const relative = {
     x: Math.round((rect.x - display.bounds.x) * scaleFactor),
@@ -404,13 +412,15 @@ function cropImageToSelection(image, rect, display) {
     width: Math.round(rect.width * scaleFactor),
     height: Math.round(rect.height * scaleFactor),
   };
+
   return image.crop(relative);
 }
-function getKeyListenerPath() {
+
+function getKeyListenerPath(): string {
   const possiblePaths = [
     path.join(__dirname, 'key_listener.exe'),
     path.join(__dirname, '..', 'src', 'key_listener.exe'),
-    path.join(electron_1.app.getAppPath(), 'src', 'key_listener.exe'),
+    path.join(app.getAppPath(), 'src', 'key_listener.exe'),
   ];
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) return p;
@@ -419,11 +429,14 @@ function getKeyListenerPath() {
     'key_listener.exe not found. Run: csc /target:winexe /out:key_listener.exe key_listener.cs'
   );
 }
-function startKeyListener() {
+
+function startKeyListener(): void {
   stopKeyListener();
+
   const binaryPath = getKeyListenerPath();
-  keyListenerProcess = (0, child_process_1.spawn)(binaryPath);
-  keyListenerProcess.stdout?.on('data', (data) => {
+  keyListenerProcess = spawn(binaryPath);
+
+  keyListenerProcess.stdout?.on('data', (data: Buffer) => {
     const lines = data.toString().split(/\r?\n/);
     for (const line of lines) {
       const trimmed = line.trim();
@@ -431,13 +444,16 @@ function startKeyListener() {
       handleGlobalKeyEvent(trimmed);
     }
   });
-  keyListenerProcess.on('error', (err) => {
+
+  keyListenerProcess.on('error', (err: Error) => {
     console.error('Key listener process error:', err);
     setStatus('Klavye dinleyici başlatılamadı');
   });
+
   setStatus('Çift Ctrl ile seçim modu hazır');
 }
-function stopKeyListener() {
+
+function stopKeyListener(): void {
   if (keyListenerProcess) {
     try {
       keyListenerProcess.kill();
@@ -447,7 +463,8 @@ function stopKeyListener() {
     keyListenerProcess = null;
   }
 }
-function handleGlobalKeyEvent(event) {
+
+function handleGlobalKeyEvent(event: string): void {
   if (event === 'DOUBLE_CTRL') {
     if (!selectionActive) {
       startSelectionSession();
@@ -476,41 +493,52 @@ function handleGlobalKeyEvent(event) {
     }
   }
 }
-async function captureAndSend() {
+
+async function captureAndSend(): Promise<void> {
   try {
     if (!selectionRect || !selectionDisplay || !capturedScreenImage) {
       setStatus('Seçim alanı veya yakalanan ekran resmi bulunamadı');
       return;
     }
+
     const absoluteRect = toAbsoluteRect(selectionRect);
     const display = selectionDisplay;
     const clampedRect = clampRectToDisplay(absoluteRect, display.bounds);
+
     if (clampedRect.width <= 0 || clampedRect.height <= 0) {
       setStatus('Geçersiz seçim alanı');
       return;
     }
+
     hideSelectionOverlay();
+
     const croppedImage = cropImageToSelection(capturedScreenImage, clampedRect, display);
-    electron_1.clipboard.writeImage(croppedImage);
+
+    clipboard.writeImage(croppedImage);
+
     const windowInstance = await openGeminiWindow();
     const composerFocused = await focusGeminiComposer(windowInstance);
+
     sendPasteShortcut(windowInstance);
+
     setResponse(
       `Seçilen alan Gemini web'e kopyalandı. ${composerFocused ? 'Yapıştırma denendi.' : 'Yapıştırma kısayolu gönderildi.'}`
     );
     setStatus("Seçilen görsel Gemini web'e yapıştırıldı");
     resetSelectionSession();
-  } catch (error) {
+  } catch (error: any) {
     setResponse(`Hata: ${error.message}`);
     setStatus('Seçim veya yapıştırma sırasında hata');
   }
 }
-async function captureAndSendToSupabase() {
+
+async function captureAndSendToSupabase(): Promise<void> {
   try {
     if (!selectionRect || !selectionDisplay || !capturedScreenImage) {
       setStatus('Seçim alanı veya yakalanan ekran resmi bulunamadı');
       return;
     }
+
     if (!settings.supabaseUrl || !settings.supabaseKey) {
       setStatus('Supabase ayarları eksik! Lütfen ayarlardan doldurun.');
       setResponse('Hata: Supabase URL veya Anon Key tanımlanmamış. Ayarları kontrol edin.');
@@ -518,51 +546,63 @@ async function captureAndSendToSupabase() {
       resetSelectionSession();
       return;
     }
+
     const absoluteRect = toAbsoluteRect(selectionRect);
     const display = selectionDisplay;
     const clampedRect = clampRectToDisplay(absoluteRect, display.bounds);
+
     if (clampedRect.width <= 0 || clampedRect.height <= 0) {
       setStatus('Geçersiz seçim alanı');
       return;
     }
+
     hideSelectionOverlay();
     setStatus("Görsel Supabase'e yükleniyor...");
+
     const croppedImage = cropImageToSelection(capturedScreenImage, clampedRect, display);
     const pngBuffer = croppedImage.toPNG();
+
     const bucket = settings.supabaseBucket || 'screenshots';
     const fileName = `screenshot_${Date.now()}.png`;
+
     if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl) {
-      supabaseClient = (0, supabase_js_1.createClient)(settings.supabaseUrl, settings.supabaseKey, {
+      supabaseClient = createClient(settings.supabaseUrl, settings.supabaseKey, {
         auth: { persistSession: false, autoRefreshToken: false },
       });
       supabaseClientUrl = settings.supabaseUrl;
     }
+
     const { error } = await supabaseClient.storage.from(bucket).upload(fileName, pngBuffer, {
       contentType: 'image/png',
       upsert: true,
     });
+
     if (error) {
       throw new Error(`Supabase upload hatası: ${error.message}`);
     }
+
     const { data: publicUrlData } = supabaseClient.storage.from(bucket).getPublicUrl(fileName);
+
     setResponse(`Supabase'e başarıyla yüklendi!\nGörsel Adresi:\n${publicUrlData.publicUrl}`);
     setStatus('Seçilen görsel telefona gönderildi (Supabase)');
     resetSelectionSession();
-  } catch (error) {
+  } catch (error: any) {
     console.error('Supabase upload error:', error);
     setResponse(`Hata: ${error.message}`);
     setStatus('Supabase yükleme hatası');
     resetSelectionSession();
   }
 }
-electron_1.ipcMain.handle('app-ready', () => ({
+
+ipcMain.handle('app-ready', () => ({
   prompt: settings.prompt,
   supabaseUrl: settings.supabaseUrl,
   supabaseKey: settings.supabaseKey,
   supabaseBucket: settings.supabaseBucket,
   selectionActive,
 }));
-electron_1.ipcMain.handle('generate-qr', async () => {
+
+ipcMain.handle('generate-qr', async () => {
   try {
     if (!settings.supabaseUrl || !settings.supabaseKey) {
       return { ok: false, error: 'Supabase ayarları eksik' };
@@ -572,109 +612,130 @@ electron_1.ipcMain.handle('generate-qr', async () => {
       key: settings.supabaseKey,
       bucket: settings.supabaseBucket || 'SCREENSHOTS',
     });
-    const dataUrl = await qrcode_1.default.toDataURL(data);
+    const dataUrl = await QRCode.toDataURL(data);
     return { ok: true, dataUrl };
-  } catch (error) {
+  } catch (error: any) {
     console.error('QR Kod oluşturma hatası:', error);
     return { ok: false, error: error.message };
   }
 });
-electron_1.ipcMain.handle('save-settings', (_, nextSettings) => {
+
+ipcMain.handle('save-settings', (_, nextSettings: Partial<AppSettings>) => {
   Object.assign(settings, {
     prompt: nextSettings.prompt ?? settings.prompt,
     supabaseUrl: nextSettings.supabaseUrl ?? settings.supabaseUrl,
     supabaseKey: nextSettings.supabaseKey ?? settings.supabaseKey,
     supabaseBucket: nextSettings.supabaseBucket ?? settings.supabaseBucket,
   });
+
   supabaseClient = null;
   supabaseClientUrl = '';
+
   saveSettingsToFile();
   return { ok: true };
 });
-electron_1.ipcMain.handle('open-gemini', async () => {
+
+ipcMain.handle('open-gemini', async () => {
   const windowInstance = await openGeminiWindow();
   return { ok: Boolean(windowInstance) };
 });
-electron_1.ipcMain.handle('focus-gemini', async () => {
+
+ipcMain.handle('focus-gemini', async () => {
   const windowInstance = await openGeminiWindow();
   return { ok: Boolean(windowInstance) };
 });
-electron_1.ipcMain.handle('capture-now', async () => {
+
+ipcMain.handle('capture-now', async () => {
   if (!selectionActive) {
     startSelectionSession();
     return { ok: true, mode: 'selection-opened' };
   }
+
   await captureAndSend();
   return { ok: true };
 });
-electron_1.ipcMain.handle('set-selection', (_, payload) => {
+
+ipcMain.handle('set-selection', (_, payload: any) => {
   if (!selectionActive) {
     return { ok: false };
   }
+
   if (payload?.type === 'start') {
     selectionRect = null;
     selectionDisplay = null;
     return { ok: true };
   }
+
   if (payload?.type === 'update') {
-    const rect = payload.rect;
+    const rect = payload.rect as Rect;
     if (!rect || rect.width <= 0 || rect.height <= 0) {
       selectionRect = null;
       selectionDisplay = null;
       return { ok: true };
     }
+
     selectionRect = rect;
-    selectionDisplay = electron_1.screen.getDisplayMatching(toAbsoluteRect(rect));
+    selectionDisplay = screen.getDisplayMatching(toAbsoluteRect(rect));
     return { ok: true };
   }
+
   return { ok: false };
 });
-electron_1.ipcMain.handle('cancel-selection', () => {
+
+ipcMain.handle('cancel-selection', () => {
   hideSelectionOverlay();
   resetSelectionSession();
   setStatus('Seçim iptal edildi');
   return { ok: true };
 });
+
 // ── Auto-updater ────────────────────────────────────────────────────────────
-electron_updater_1.autoUpdater.on('checking-for-update', () => {
+autoUpdater.on('checking-for-update', () => {
   console.log('Checking for update...');
 });
-electron_updater_1.autoUpdater.on('update-available', () => {
+autoUpdater.on('update-available', () => {
   console.log('Update available.');
 });
-electron_updater_1.autoUpdater.on('update-not-available', () => {
+autoUpdater.on('update-not-available', () => {
   console.log('Update not available.');
 });
-electron_updater_1.autoUpdater.on('error', (err) => {
+autoUpdater.on('error', (err) => {
   console.error('Error in auto-updater:', err);
 });
-electron_updater_1.autoUpdater.on('update-downloaded', () => {
+autoUpdater.on('update-downloaded', () => {
   console.log('Update downloaded; will install on quit');
 });
-electron_1.app.whenReady().then(() => {
+
+app.whenReady().then(() => {
   loadSettingsFromFile();
   createMainWindow();
   createOverlayWindow();
   startKeyListener();
+
   setTimeout(() => {
     ensureGeminiWindowLoaded();
   }, 5000);
-  electron_updater_1.autoUpdater.checkForUpdatesAndNotify();
-  electron_1.app.on('activate', () => {
-    if (electron_1.BrowserWindow.getAllWindows().length === 0) {
+
+  autoUpdater.checkForUpdatesAndNotify();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
       createOverlayWindow();
     }
   });
 });
-electron_1.app.on('before-quit', () => {
-  electron_1.app.isQuitting = true;
+
+app.on('before-quit', () => {
+  (app as any).isQuitting = true;
 });
-electron_1.app.on('will-quit', () => {
+
+app.on('will-quit', () => {
   stopKeyListener();
 });
-electron_1.app.on('window-all-closed', () => {
+
+app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    electron_1.app.quit();
+    app.quit();
   }
 });
