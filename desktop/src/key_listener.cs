@@ -13,6 +13,10 @@ class KeyListener
     private const int WM_SYSKEYUP = 0x0105;
 
     private const int VK_LCONTROL = 0xA2;
+    private const int VK_RCONTROL = 0xA3;
+    private const int VK_LSHIFT = 0xA0;
+    private const int VK_RSHIFT = 0xA1;
+    private const int VK_V = 0x56;
     private const int VK_X = 0x58;
     private const int VK_ESCAPE = 0x1B;
     private const int VK_RETURN = 0x0D;
@@ -23,6 +27,8 @@ class KeyListener
     private static DateTime _lastPress = DateTime.MinValue;
     private static readonly TimeSpan DoublePressThreshold = TimeSpan.FromMilliseconds(400);
     private static volatile bool _selectionActive = false;
+    private static volatile bool _ctrlHeld = false;
+    private static volatile bool _shiftHeld = false;
 
     public static void Main()
     {
@@ -79,6 +85,17 @@ class KeyListener
             bool isKeyUp = wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP;
             bool isKeyDown = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
 
+            // Track modifier key states
+            if (vkCode == VK_LCONTROL || vkCode == VK_RCONTROL)
+            {
+                _ctrlHeld = isKeyDown;
+            }
+            if (vkCode == VK_LSHIFT || vkCode == VK_RSHIFT)
+            {
+                _shiftHeld = isKeyDown;
+            }
+
+            // Double Ctrl detection (left Ctrl only)
             if (vkCode == VK_LCONTROL && isKeyUp)
             {
                 DateTime now = DateTime.Now;
@@ -92,6 +109,14 @@ class KeyListener
                 {
                     _lastPress = now;
                 }
+            }
+
+            // Ctrl+Shift+V — global clipboard send (works outside selection mode)
+            if (vkCode == VK_V && isKeyDown && _ctrlHeld && _shiftHeld)
+            {
+                Console.WriteLine("CTRL_SHIFT_V");
+                Console.Out.Flush();
+                return (IntPtr)1; // Block the key
             }
             
             // If selection is active, block these keys on both down and up events

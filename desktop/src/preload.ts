@@ -19,6 +19,7 @@ const bridge: BridgeAPI = {
   confirmSelectionPhone: () => ipcRenderer.invoke('confirm-selection-phone'),
   getStorageUsage: () => ipcRenderer.invoke('get-storage-usage'),
   purgeStorage: () => ipcRenderer.invoke('purge-storage'),
+  sendClipboard: () => ipcRenderer.invoke('send-clipboard'),
 };
 
 contextBridge.exposeInMainWorld('bridge', bridge);

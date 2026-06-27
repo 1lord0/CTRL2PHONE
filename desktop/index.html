@@ -10,12 +10,15 @@
 	<body>
 		<main class="shell">
 			<section class="hero">
-				<p class="eyebrow">Windows ekran aracı</p>
-				<h1>Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
-				<p class="lede">
-					İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra: X veya Enter ile Gemini'a, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna basın. Q ile çık.
-				</p>
-			</section>
+			<p class="eyebrow">Windows ekran aracı</p>
+			<h1>Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
+			<p class="lede">
+				İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra: X veya Enter ile Gemini'a, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna basın. Q ile çık.
+			</p>
+			<p class="lede" style="margin-top: 8px; color: #60a5fa; font-weight: 600;">
+				📋 Ctrl+Shift+V → Panodaki metni/linki anında telefona gönderir
+			</p>
+		</section>
 
 			<section class="card grid">
 				<label class="span-2">
@@ -59,9 +62,10 @@
 				</div>
 
 				<div class="actions span-2" style="display: flex; gap: 12px; margin-top: 5px;">
-					<button id="saveSettings" style="flex: 2;">Ayarları kaydet</button>
-					<button id="purgeStorage" style="flex: 1; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; font-weight: bold; cursor: pointer; transition: all 0.2s;">Bulutu Temizle</button>
-				</div>
+				<button id="saveSettings" style="flex: 2;">Ayarları kaydet</button>
+				<button id="sendClipboard" style="flex: 1; background: rgba(96, 165, 250, 0.12); border: 1px solid rgba(96, 165, 250, 0.3); color: #60a5fa; font-weight: bold; cursor: pointer; transition: all 0.2s;">📋 Telefona Gönder</button>
+				<button id="purgeStorage" style="flex: 1; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; font-weight: bold; cursor: pointer; transition: all 0.2s;">Bulutu Temizle</button>
+			</div>
 			</section>
 
 			<section class="card status-card">

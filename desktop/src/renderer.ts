@@ -124,3 +124,15 @@ document.getElementById('purgeStorage')?.addEventListener('click', async () => {
     statusNode.textContent = `Hata: ${e.message}`;
   }
 });
+
+document.getElementById('sendClipboard')?.addEventListener('click', async () => {
+  statusNode.textContent = 'Metin telefona gönderiliyor...';
+  try {
+    const result = await window.bridge.sendClipboard();
+    if (!result?.ok) {
+      statusNode.textContent = `Gönderim hatası: ${result?.error || 'Bilinmeyen hata'}`;
+    }
+  } catch (e: any) {
+    statusNode.textContent = `Hata: ${e.message}`;
+  }
+});

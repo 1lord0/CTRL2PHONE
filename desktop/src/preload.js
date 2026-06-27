@@ -18,5 +18,6 @@ const bridge = {
     confirmSelectionPhone: () => electron_1.ipcRenderer.invoke('confirm-selection-phone'),
     getStorageUsage: () => electron_1.ipcRenderer.invoke('get-storage-usage'),
     purgeStorage: () => electron_1.ipcRenderer.invoke('purge-storage'),
+    sendClipboard: () => electron_1.ipcRenderer.invoke('send-clipboard'),
 };
 electron_1.contextBridge.exposeInMainWorld('bridge', bridge);

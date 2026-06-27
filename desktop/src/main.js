@@ -65,11 +65,128 @@ const settings = {
 const geminiUrl = 'https://gemini.google.com/app';
 let settingsPath;
 let phoneSyncInterval = null;
+let clipboardSyncInterval = null;
 function stopPhoneSyncPolling() {
     if (phoneSyncInterval) {
         clearInterval(phoneSyncInterval);
         phoneSyncInterval = null;
     }
+}
+function stopClipboardPolling() {
+    if (clipboardSyncInterval) {
+        clearInterval(clipboardSyncInterval);
+        clipboardSyncInterval = null;
+    }
+}
+// ── Clipboard Sync ──────────────────────────────────────────────────────────
+function ensureSupabaseClient() {
+    if (!settings.supabaseUrl || !settings.supabaseKey)
+        return null;
+    if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl) {
+        supabaseClient = (0, supabase_js_1.createClient)(settings.supabaseUrl, settings.supabaseKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+        });
+        supabaseClientUrl = settings.supabaseUrl;
+    }
+    return supabaseClient;
+}
+async function sendClipboardToPhone() {
+    const text = electron_1.clipboard.readText();
+    if (!text || !text.trim()) {
+        setStatus('Panoda kopyalanmış metin bulunamadı');
+        return { ok: false, error: 'Panoda metin yok' };
+    }
+    const client = ensureSupabaseClient();
+    if (!client) {
+        setStatus('Supabase ayarları eksik!');
+        return { ok: false, error: 'Supabase ayarları eksik' };
+    }
+    try {
+        const { error } = await client.from('clipboard_sync').insert({
+            content: text.trim(),
+            source: 'desktop',
+        });
+        if (error)
+            throw new Error(error.message);
+        const { Notification } = require('electron');
+        if (Notification.isSupported()) {
+            const preview = text.trim().length > 60 ? text.trim().substring(0, 60) + '...' : text.trim();
+            new Notification({
+                title: 'Metin Telefona Gönderildi',
+                body: preview,
+                silent: false,
+            }).show();
+        }
+        setStatus('Pano metni telefona gönderildi');
+        setResponse(`Gönderilen metin: ${text.trim().substring(0, 200)}`);
+        return { ok: true };
+    }
+    catch (err) {
+        console.error('Clipboard send error:', err);
+        setStatus('Metin gönderme hatası: ' + err.message);
+        return { ok: false, error: err.message };
+    }
+}
+let isCheckingClipboard = false;
+let lastProcessedClipboardId = null;
+async function checkClipboardFromMobile() {
+    if (isCheckingClipboard)
+        return;
+    const client = ensureSupabaseClient();
+    if (!client)
+        return;
+    isCheckingClipboard = true;
+    try {
+        const { data, error } = await client
+            .from('clipboard_sync')
+            .select('*')
+            .eq('source', 'mobile')
+            .order('created_at', { ascending: true })
+            .limit(1);
+        if (error) {
+            console.warn('Clipboard poll error:', error.message);
+            return;
+        }
+        if (data && data.length > 0) {
+            const row = data[0];
+            if (row.id !== lastProcessedClipboardId) {
+                lastProcessedClipboardId = row.id;
+                const content = row.content;
+                if (content) {
+                    electron_1.clipboard.writeText(content);
+                    const { Notification } = require('electron');
+                    if (Notification.isSupported()) {
+                        const preview = content.length > 60 ? content.substring(0, 60) + '...' : content;
+                        new Notification({
+                            title: 'Telefondan Metin Alındı',
+                            body: preview,
+                            silent: false,
+                        }).show();
+                    }
+                    setStatus('Telefondan metin alındı');
+                    setResponse(`Alınan metin: ${content.substring(0, 200)}`);
+                }
+            }
+            // Always try to delete the record from database to keep it clean
+            await client.from('clipboard_sync').delete().eq('id', row.id);
+        }
+    }
+    catch (err) {
+        console.error('checkClipboardFromMobile error:', err);
+    }
+    finally {
+        isCheckingClipboard = false;
+    }
+}
+function setupClipboardPolling() {
+    stopClipboardPolling();
+    const client = ensureSupabaseClient();
+    if (!client) {
+        console.log('Clipboard polling: waiting for Supabase settings');
+        return;
+    }
+    clipboardSyncInterval = setInterval(checkClipboardFromMobile, 1500);
+    console.log('Clipboard polling initialized (1.5s)');
 }
 async function checkPhoneSync() {
     if (!settings.autoCopyFromPhone) {
@@ -138,16 +255,28 @@ async function checkPhoneSync() {
             }
         }
         if (downloadedLocalPaths.length > 0) {
-            // Launch Spotlight-style floating photo dropper C# executable with all paths
-            const dropperPath = path.join(electron_1.app.getAppPath(), 'src', 'photo_dropper.exe');
-            if (fs.existsSync(dropperPath)) {
+            const possibleDropperPaths = [
+                path.join(process.resourcesPath, 'src', 'photo_dropper.exe'),
+                path.join(process.resourcesPath, 'photo_dropper.exe'),
+                path.join(__dirname, 'photo_dropper.exe'),
+                path.join(__dirname, '..', 'src', 'photo_dropper.exe'),
+                path.join(electron_1.app.getAppPath(), 'src', 'photo_dropper.exe'),
+            ];
+            let dropperPath = '';
+            for (const p of possibleDropperPaths) {
+                if (fs.existsSync(p)) {
+                    dropperPath = p;
+                    break;
+                }
+            }
+            if (dropperPath) {
                 (0, child_process_1.spawn)(dropperPath, downloadedLocalPaths, {
                     detached: true,
                     stdio: 'ignore'
                 }).unref();
             }
             else {
-                console.error('[Phone Sync] photo_dropper.exe not found at:', dropperPath);
+                console.error('[Phone Sync] photo_dropper.exe not found at paths:', possibleDropperPaths.join(', '));
             }
             const { Notification } = require('electron');
             if (Notification.isSupported()) {
@@ -510,6 +639,8 @@ function cropImageToSelection(image, rect, display) {
 }
 function getKeyListenerPath() {
     const possiblePaths = [
+        path.join(process.resourcesPath, 'src', 'key_listener.exe'),
+        path.join(process.resourcesPath, 'key_listener.exe'),
         path.join(__dirname, 'key_listener.exe'),
         path.join(__dirname, '..', 'src', 'key_listener.exe'),
         path.join(electron_1.app.getAppPath(), 'src', 'key_listener.exe'),
@@ -518,7 +649,7 @@ function getKeyListenerPath() {
         if (fs.existsSync(p))
             return p;
     }
-    throw new Error('key_listener.exe not found. Run: csc /target:winexe /out:key_listener.exe key_listener.cs');
+    throw new Error(`key_listener.exe not found at paths: ${possiblePaths.join(', ')}. Run: csc /target:winexe /out:key_listener.exe key_listener.cs`);
 }
 function startKeyListener() {
     stopKeyListener();
@@ -573,6 +704,9 @@ function handleGlobalKeyEvent(event) {
             }
             captureAndSendToSupabase();
         }
+    }
+    else if (event === 'CTRL_SHIFT_V') {
+        sendClipboardToPhone();
     }
     else if (event === 'KEY_ESCAPE') {
         if (selectionActive) {
@@ -712,6 +846,7 @@ electron_1.ipcMain.handle('save-settings', (_, nextSettings) => {
     supabaseClientUrl = '';
     saveSettingsToFile();
     setupPhoneSyncPolling();
+    setupClipboardPolling();
     return { ok: true };
 });
 electron_1.ipcMain.handle('open-gemini', async () => {
@@ -865,6 +1000,9 @@ electron_1.ipcMain.handle('purge-storage', async () => {
         return { ok: false, error: err.message };
     }
 });
+electron_1.ipcMain.handle('send-clipboard', async () => {
+    return sendClipboardToPhone();
+});
 // ── Auto-updater ────────────────────────────────────────────────────────────
 electron_updater_1.autoUpdater.on('checking-for-update', () => {
     console.log('Checking for update...');
@@ -881,29 +1019,45 @@ electron_updater_1.autoUpdater.on('error', (err) => {
 electron_updater_1.autoUpdater.on('update-downloaded', () => {
     console.log('Update downloaded; will install on quit');
 });
-electron_1.app.whenReady().then(() => {
-    loadSettingsFromFile();
-    createMainWindow();
-    createOverlayWindow();
-    startKeyListener();
-    setupPhoneSyncPolling();
-    setTimeout(() => {
-        ensureGeminiWindowLoaded();
-    }, 5000);
-    electron_updater_1.autoUpdater.checkForUpdatesAndNotify();
-    electron_1.app.on('activate', () => {
-        if (electron_1.BrowserWindow.getAllWindows().length === 0) {
-            createMainWindow();
-            createOverlayWindow();
+const gotTheLock = electron_1.app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    electron_1.app.quit();
+}
+else {
+    electron_1.app.on('second-instance', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized())
+                mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
         }
     });
-});
+    electron_1.app.whenReady().then(() => {
+        loadSettingsFromFile();
+        createMainWindow();
+        createOverlayWindow();
+        startKeyListener();
+        setupPhoneSyncPolling();
+        setupClipboardPolling();
+        setTimeout(() => {
+            ensureGeminiWindowLoaded();
+        }, 5000);
+        electron_updater_1.autoUpdater.checkForUpdatesAndNotify();
+        electron_1.app.on('activate', () => {
+            if (electron_1.BrowserWindow.getAllWindows().length === 0) {
+                createMainWindow();
+                createOverlayWindow();
+            }
+        });
+    });
+}
 electron_1.app.on('before-quit', () => {
     electron_1.app.isQuitting = true;
 });
 electron_1.app.on('will-quit', () => {
     stopKeyListener();
     stopPhoneSyncPolling();
+    stopClipboardPolling();
 });
 electron_1.app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {

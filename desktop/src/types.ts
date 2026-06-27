@@ -47,6 +47,7 @@ export interface BridgeAPI {
   confirmSelectionPhone: () => Promise<{ ok: boolean }>;
   getStorageUsage: () => Promise<{ ok: boolean; usedBytes?: number; limitBytes?: number; usedPercentage?: number; error?: string }>;
   purgeStorage: () => Promise<{ ok: boolean; deletedCount?: number; error?: string }>;
+  sendClipboard: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 declare global {
