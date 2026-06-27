@@ -991,26 +991,40 @@ autoUpdater.on('update-downloaded', () => {
   console.log('Update downloaded; will install on quit');
 });
 
-app.whenReady().then(() => {
-  loadSettingsFromFile();
-  createMainWindow();
-  createOverlayWindow();
-  startKeyListener();
-  setupPhoneSyncPolling();
+const gotTheLock = app.requestSingleInstanceLock();
 
-  setTimeout(() => {
-    ensureGeminiWindowLoaded();
-  }, 5000);
-
-  autoUpdater.checkForUpdatesAndNotify();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
-      createOverlayWindow();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
     }
   });
-});
+
+  app.whenReady().then(() => {
+    loadSettingsFromFile();
+    createMainWindow();
+    createOverlayWindow();
+    startKeyListener();
+    setupPhoneSyncPolling();
+
+    setTimeout(() => {
+      ensureGeminiWindowLoaded();
+    }, 5000);
+
+    autoUpdater.checkForUpdatesAndNotify();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow();
+        createOverlayWindow();
+      }
+    });
+  });
+}
 
 app.on('before-quit', () => {
   (app as any).isQuitting = true;
