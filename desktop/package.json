@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",
+    "electron-updater": "^6.3.0",
     "qrcode": "^1.5.4",
     "screenshot-desktop": "^1.15.1"
   },
@@ -37,7 +38,6 @@
     "@typescript-eslint/parser": "^8.0.0",
     "electron": "^35.0.0",
     "electron-builder": "^25.1.0",
-    "electron-updater": "^6.3.0",
     "eslint": "^9.0.0",
     "prettier": "^3.5.0",
     "typescript": "^5.7.0"

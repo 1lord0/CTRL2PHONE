@@ -16,7 +16,7 @@
         android:maxSdkVersion="29" />
 
     <application
-        android:label="phone_app"
+        android:label="ctrl2phone"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">
