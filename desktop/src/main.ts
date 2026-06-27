@@ -572,6 +572,8 @@ function cropImageToSelection(
 
 function getKeyListenerPath(): string {
   const possiblePaths = [
+    path.join(process.resourcesPath, 'src', 'key_listener.exe'),
+    path.join(process.resourcesPath, 'key_listener.exe'),
     path.join(__dirname, 'key_listener.exe'),
     path.join(__dirname, '..', 'src', 'key_listener.exe'),
     path.join(app.getAppPath(), 'src', 'key_listener.exe'),
@@ -580,7 +582,7 @@ function getKeyListenerPath(): string {
     if (fs.existsSync(p)) return p;
   }
   throw new Error(
-    'key_listener.exe not found. Run: csc /target:winexe /out:key_listener.exe key_listener.cs'
+    `key_listener.exe not found at paths: ${possiblePaths.join(', ')}. Run: csc /target:winexe /out:key_listener.exe key_listener.cs`
   );
 }
 
