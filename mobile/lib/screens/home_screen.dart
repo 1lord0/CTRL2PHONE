@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/supabase_service.dart';
@@ -16,6 +18,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late final ScrollController _scrollController;
+  Map<String, dynamic>? _storageUsage;
+  bool _loadingStorage = false;
 
   @override
   void initState() {
@@ -24,7 +28,75 @@ class _HomeScreenState extends State<HomeScreen> {
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PhotosProvider>().loadPhotos();
+      _fetchStorageUsage();
     });
+  }
+
+  Future<void> _fetchStorageUsage() async {
+    if (!mounted) return;
+    setState(() => _loadingStorage = true);
+    try {
+      final usage = await SupabaseService().getStorageUsage();
+      if (mounted) {
+        setState(() {
+          _storageUsage = usage;
+          _loadingStorage = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch storage usage: $e');
+      if (mounted) {
+        setState(() => _loadingStorage = false);
+      }
+    }
+  }
+  Future<void> _purgeStorage() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Depolamayı Temizle'),
+        content: const Text(
+            'Supabase bulut depolama içerisindeki tüm görseller (to_pc dahil) KALICI olarak silinecektir. Emin misiniz?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('İptal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Temizle'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      setState(() => _loadingStorage = true);
+      try {
+        final count = await SupabaseService().purgeStorage();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Temizlik başarılı! $count dosya silindi.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          context.read<PhotosProvider>().refresh();
+          _fetchStorageUsage();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Temizlik hatası: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          setState(() => _loadingStorage = false);
+        }
+      }
+    }
   }
 
   @override
@@ -41,7 +113,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onRefresh() async {
-    await context.read<PhotosProvider>().refresh();
+    await Future.wait([
+      context.read<PhotosProvider>().refresh(),
+      _fetchStorageUsage(),
+    ]);
   }
 
   void _onPhotoTap(List<Photo> photos, int index) {
@@ -134,10 +209,101 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: _buildBody(theme, provider),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showSourcePicker(context),
+        icon: const Icon(Icons.send_rounded),
+        label: const Text('Bilgisayara Gönder'),
+      ),
     );
   }
 
   Widget _buildBody(ThemeData theme, PhotosProvider provider) {
+    return Column(
+      children: [
+        _buildStorageIndicator(theme),
+        Expanded(
+          child: _buildMainContent(theme, provider),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStorageIndicator(ThemeData theme) {
+    if (_storageUsage == null) return const SizedBox.shrink();
+
+    final used = _storageUsage!['usedBytes'] as int;
+    final limit = _storageUsage!['limitBytes'] as int;
+    final pct = _storageUsage!['percentage'] as double;
+
+    final usedMb = used / (1024 * 1024);
+    final limitMb = limit / (1024 * 1024);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest?.withOpacity(0.4) ?? theme.colorScheme.surfaceVariant.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withOpacity(0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_queue_rounded, size: 16, color: theme.colorScheme.primary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Supabase Depolama',
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Row(
+                children: [
+                  Text(
+                    '${usedMb.toStringAsFixed(1)} MB / ${limitMb.toStringAsFixed(0)} MB (%${pct.toStringAsFixed(1)})',
+                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.red.shade400),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    tooltip: 'Temizle',
+                    onPressed: _purgeStorage,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: pct / 100,
+              backgroundColor: theme.colorScheme.surfaceContainerHighest ?? theme.colorScheme.surfaceVariant,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                pct > 90 ? Colors.red : (pct > 75 ? Colors.orange : theme.colorScheme.primary),
+              ),
+              minHeight: 6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMainContent(ThemeData theme, PhotosProvider provider) {
     if (provider.error != null && provider.photos.isEmpty) {
       return Center(
         child: Padding(
@@ -221,6 +387,219 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () => _onPhotoTap(provider.photos, index),
           );
         },
+      ),
+    );
+  }
+
+  final ImagePicker _picker = ImagePicker();
+
+  Future<void> _pickAndUploadImage(ImageSource source) async {
+    try {
+      final XFile? image = await _picker.pickImage(
+        source: source,
+        imageQuality: 85,
+      );
+      if (image == null) return;
+
+      if (!mounted) return;
+      _showUploadDialog(context, message: 'Fotoğraf bilgisayara gönderiliyor...');
+
+      final bytes = await image.readAsBytes();
+      final extension = image.path.split('.').last.toLowerCase();
+      final fileName = 'upload_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      await SupabaseService().uploadToPC(bytes, fileName);
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Fotoğraf başarıyla bilgisayara gönderildi!'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog if open
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gönderim hatası: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _pickAndUploadMultipleImages() async {
+    try {
+      final List<XFile> images = await _picker.pickMultiImage(
+        imageQuality: 85,
+      );
+      if (images.isEmpty) return;
+
+      if (!mounted) return;
+      _showUploadDialog(context, message: 'Fotoğraflar gönderiliyor (0/${images.length})...');
+
+      for (int i = 0; i < images.length; i++) {
+        if (i > 0 && mounted) {
+          Navigator.pop(context); // Pop previous progress dialog
+          _showUploadDialog(context, message: 'Fotoğraflar gönderiliyor ($i/${images.length})...');
+        }
+
+        final image = images[i];
+        final bytes = await image.readAsBytes();
+        final extension = image.path.split('.').last.toLowerCase();
+        
+        final timestamp = DateTime.now().millisecondsSinceEpoch + i;
+        final fileName = 'upload_${timestamp}_$i.$extension';
+        
+        await SupabaseService().uploadToPC(bytes, fileName);
+      }
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${images.length} fotoğraf başarıyla bilgisayara gönderildi!'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog if open
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gönderim hatası: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _showUploadDialog(BuildContext context, {String message = 'Fotoğraf bilgisayara gönderiliyor...'}) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 20),
+              Expanded(child: Text(message)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSourcePicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Bilgisayara Gönder',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Seçtiğiniz fotoğraf anında bilgisayarınızın panosuna kopyalanacaktır.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _SourceOption(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Kamera',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickAndUploadImage(ImageSource.camera);
+                    },
+                  ),
+                  _SourceOption(
+                    icon: Icons.photo_library_rounded,
+                    label: 'Galeri',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickAndUploadMultipleImages();
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SourceOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SourceOption({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 110,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 36, color: theme.colorScheme.primary),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

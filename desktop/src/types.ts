@@ -3,6 +3,7 @@ export interface AppSettings {
   supabaseUrl: string;
   supabaseKey: string;
   supabaseBucket: string;
+  autoCopyFromPhone: boolean;
 }
 
 export interface Rect {
@@ -42,6 +43,10 @@ export interface BridgeAPI {
   onResponse: (callback: (message: string) => void) => void;
   onOverlayState: (callback: (state: OverlayState) => void) => void;
   onOverlayMessage: (callback: (message: string) => void) => void;
+  confirmSelectionGemini: () => Promise<{ ok: boolean }>;
+  confirmSelectionPhone: () => Promise<{ ok: boolean }>;
+  getStorageUsage: () => Promise<{ ok: boolean; usedBytes?: number; limitBytes?: number; usedPercentage?: number; error?: string }>;
+  purgeStorage: () => Promise<{ ok: boolean; deletedCount?: number; error?: string }>;
 }
 
 declare global {

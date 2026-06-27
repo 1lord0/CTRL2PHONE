@@ -13,6 +13,9 @@ dependencies:
   # State management
   provider: ^6.1.0
 
+  # Image selection
+  image_picker: ^1.1.2
+
   # Supabase client
   supabase_flutter: ^2.8.0
 

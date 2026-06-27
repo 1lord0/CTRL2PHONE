@@ -1,5 +1,9 @@
 const selectionBox = document.getElementById('selectionBox') as HTMLElement;
 const overlayText = document.getElementById('overlayText') as HTMLElement;
+const actionBar = document.getElementById('actionBar') as HTMLElement;
+const btnGemini = document.getElementById('btnGemini') as HTMLButtonElement;
+const btnPhone = document.getElementById('btnPhone') as HTMLButtonElement;
+const btnCancel = document.getElementById('btnCancel') as HTMLButtonElement;
 
 let active = false;
 let dragging = false;
@@ -11,6 +15,7 @@ function renderSelection(
 ): void {
   if (!rect) {
     selectionBox.classList.add('hidden');
+    actionBar.classList.add('hidden');
     return;
   }
 
@@ -53,10 +58,18 @@ window.addEventListener('mousedown', (event) => {
     return;
   }
 
+  // Check if click was inside the action bar; if so, do not initiate a new drag
+  if (actionBar.contains(event.target as Node)) {
+    return;
+  }
+
   dragging = true;
+  document.body.classList.add('selecting');
+  actionBar.classList.add('hidden');
+
   startPoint = { x: event.clientX, y: event.clientY };
   currentRect = { x: startPoint.x, y: startPoint.y, width: 0, height: 0 };
-  overlayText.textContent = 'Sürükle ve bırak, sonra X veya Enter ile gönder';
+  overlayText.textContent = 'Alanı seçin (X / Enter ile Gemini, M ile Telefon)';
   renderSelection(currentRect);
   window.bridge.setSelection({ type: 'start' });
 });
@@ -66,18 +79,28 @@ window.addEventListener('mouseup', async (event) => {
     return;
   }
 
+  // Check if click was inside the action bar
+  if (actionBar.contains(event.target as Node)) {
+    dragging = false;
+    return;
+  }
+
   dragging = false;
   currentRect = updateRect({ x: event.clientX, y: event.clientY });
   renderSelection(currentRect);
 
   if (currentRect && currentRect.width > 4 && currentRect.height > 4) {
     await window.bridge.setSelection({ type: 'update', rect: currentRect });
-    overlayText.textContent = 'Seçim hazır. X veya Enter ile gönder, Esc ile iptal et.';
+    overlayText.textContent = 'Seçim hazır. Gönderim modunu seçin:';
+    
+    // Position action bar correctly and make it visible
+    actionBar.classList.remove('hidden');
   } else {
     currentRect = null;
     startPoint = null;
     renderSelection(null);
-    overlayText.textContent = 'En az bir alan seç';
+    document.body.classList.remove('selecting');
+    overlayText.textContent = 'Ekranı sürükleyerek bir alan seçin.';
   }
 });
 
@@ -85,6 +108,23 @@ window.addEventListener('contextmenu', (event) => {
   event.preventDefault();
 });
 
+// ── Button Event Listeners ───────────────────────────────────────
+btnGemini.addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.bridge.confirmSelectionGemini();
+});
+
+btnPhone.addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.bridge.confirmSelectionPhone();
+});
+
+btnCancel.addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.bridge.cancelSelection();
+});
+
+// ── Bridge State Updates ─────────────────────────────────────────
 window.bridge.onOverlayState((state) => {
   active = Boolean(state?.active);
   selectionBox.classList.toggle('hidden', !state?.visible);
@@ -98,14 +138,19 @@ window.bridge.onOverlayState((state) => {
   if (!active) {
     dragging = false;
     startPoint = null;
+    document.body.classList.remove('selecting');
+    actionBar.classList.add('hidden');
   }
 
   if (state?.selection) {
     currentRect = state.selection;
     renderSelection(currentRect);
+    document.body.classList.add('selecting');
+    actionBar.classList.remove('hidden');
   } else if (!dragging) {
     currentRect = null;
     renderSelection(null);
+    actionBar.classList.add('hidden');
   }
 });
 

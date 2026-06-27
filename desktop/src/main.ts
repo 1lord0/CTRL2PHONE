@@ -17,8 +17,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { autoUpdater } from 'electron-updater';
 import { AppSettings, Rect } from './types';
 
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch('disable-gpu');
+// GPU acceleration is enabled (required for native startDrag to work on Windows)
 
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
@@ -36,11 +35,151 @@ const settings: AppSettings = {
   supabaseUrl: '',
   supabaseKey: '',
   supabaseBucket: 'screenshots',
+  autoCopyFromPhone: true,
 };
 
 const geminiUrl = 'https://gemini.google.com/app';
 
 let settingsPath: string | undefined;
+let phoneSyncInterval: NodeJS.Timeout | null = null;
+
+function stopPhoneSyncPolling(): void {
+  if (phoneSyncInterval) {
+    clearInterval(phoneSyncInterval);
+    phoneSyncInterval = null;
+  }
+}
+
+async function checkPhoneSync(): Promise<void> {
+  if (!settings.autoCopyFromPhone) {
+    return;
+  }
+
+  if (!settings.supabaseUrl || !settings.supabaseKey) {
+    return;
+  }
+
+  try {
+    if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl) {
+      supabaseClient = createClient(settings.supabaseUrl, settings.supabaseKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      supabaseClientUrl = settings.supabaseUrl;
+    }
+
+    const bucket = settings.supabaseBucket || 'screenshots';
+    const { data: files, error } = await supabaseClient.storage.from(bucket).list('to_pc', {
+      limit: 10,
+      sortBy: { column: 'created_at', order: 'asc' },
+    });
+
+    if (error) {
+      // Log error but don't spam if it's a persistent connection issue
+      console.warn('Phone sync list error:', error.message);
+      return;
+    }
+
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const downloadedLocalPaths: string[] = [];
+
+    for (const file of files) {
+      if (!file.name || file.name === '.keep' || file.name.startsWith('.')) {
+        continue;
+      }
+
+      const filePath = `to_pc/${file.name}`;
+
+      const { data: fileBlob, error: downloadError } = await supabaseClient.storage
+        .from(bucket)
+        .download(filePath);
+
+      if (downloadError) {
+        console.error(`Phone sync: failed to download ${filePath}:`, downloadError);
+        continue;
+      }
+
+      const arrayBuffer = await fileBlob.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const image = nativeImage.createFromBuffer(buffer);
+
+      if (!image.isEmpty()) {
+        clipboard.writeImage(image);
+
+        // Save incoming photo locally for Native Drag-and-Drop
+        const parts = file.name.split('.');
+        const extension = parts[parts.length - 1] || 'png';
+
+        const tempDir = path.join(app.getPath('temp'), 'ctrl2phone');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+        const cleanFileName = `phone_${Date.now()}_${downloadedLocalPaths.length}.${extension}`;
+        const localFilePath = path.join(tempDir, cleanFileName);
+        fs.writeFileSync(localFilePath, buffer);
+
+        downloadedLocalPaths.push(localFilePath);
+      } else {
+        console.error('Phone sync: downloaded file is not a valid image');
+      }
+
+      // Delete from storage (cleanup)
+      const { error: deleteError } = await supabaseClient.storage.from(bucket).remove([filePath]);
+
+      if (deleteError) {
+        console.error(`Phone sync: failed to delete ${filePath}:`, deleteError);
+      }
+    }
+
+    if (downloadedLocalPaths.length > 0) {
+      // Launch Spotlight-style floating photo dropper C# executable with all paths
+      const dropperPath = path.join(app.getAppPath(), 'src', 'photo_dropper.exe');
+      if (fs.existsSync(dropperPath)) {
+        spawn(dropperPath, downloadedLocalPaths, {
+          detached: true,
+          stdio: 'ignore'
+        }).unref();
+      } else {
+        console.error('[Phone Sync] photo_dropper.exe not found at:', dropperPath);
+      }
+
+      const { Notification } = require('electron');
+      if (Notification.isSupported()) {
+        const count = downloadedLocalPaths.length;
+        const notification = new Notification({
+          title: count > 1 ? 'Telefondan Görseller Alındı' : 'Telefondan Görsel Alındı',
+          body: count > 1 ? `${count} adet fotoğraf paneli açıldı! Sürükle-bırak kullanabilirsiniz.` : 'Fotoğraf paneli açıldı! Sürükle-bırak kullanabilirsiniz.',
+          silent: false,
+        });
+        notification.show();
+      }
+
+      setStatus(downloadedLocalPaths.length > 1 ? `${downloadedLocalPaths.length} görsel telefondan alındı` : 'Görsel telefondan alındı');
+      setResponse(`${downloadedLocalPaths.length} adet görsel telefondan alındı ve sürükle-bırak paneli açıldı.`);
+    }
+  } catch (err: any) {
+    console.error('Error in checkPhoneSync:', err);
+  }
+}
+
+function setupPhoneSyncPolling(): void {
+  stopPhoneSyncPolling();
+
+  if (!settings.autoCopyFromPhone) {
+    console.log('Phone sync: disabled by settings');
+    return;
+  }
+
+  if (!settings.supabaseUrl || !settings.supabaseKey) {
+    console.log('Phone sync: waiting for Supabase settings');
+    return;
+  }
+
+  console.log('Phone sync: polling initialized');
+  phoneSyncInterval = setInterval(checkPhoneSync, 4000);
+}
 
 function loadSettingsFromFile(): void {
   try {
@@ -234,6 +373,8 @@ function createGeminiWindow(): BrowserWindow {
   return geminiWindow;
 }
 
+
+
 async function openGeminiWindow(): Promise<BrowserWindow> {
   const windowInstance = createGeminiWindow();
 
@@ -262,14 +403,27 @@ async function ensureGeminiWindowLoaded(): Promise<BrowserWindow> {
   return windowInstance;
 }
 
-async function focusGeminiComposer(windowInstance: BrowserWindow): Promise<boolean> {
+async function focusGeminiComposer(windowInstance: BrowserWindow, promptText: string): Promise<boolean> {
+  const safePrompt = JSON.stringify(promptText);
   const focused = await windowInstance.webContents.executeJavaScript(`
     (() => {
-      const selectors = ['textarea', 'input[type="text"]', '[contenteditable="true"]'];
+      const selectors = ['div[contenteditable="true"]', 'div[role="textbox"]', 'textarea', 'input[type="text"]'];
       const element = selectors.map((selector) => document.querySelector(selector)).find(Boolean);
       if (element) {
         element.focus();
         element.click();
+        
+        const prompt = ${safePrompt};
+        if (prompt) {
+          if (element.tagName === 'DIV' || element.getAttribute('contenteditable') === 'true') {
+            element.innerText = prompt;
+          } else {
+            element.value = prompt;
+          }
+          // Dispatch events so the React engine registers the change and enables Send button
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        }
         return true;
       }
       return false;
@@ -498,6 +652,8 @@ async function captureAndSend(): Promise<void> {
   try {
     if (!selectionRect || !selectionDisplay || !capturedScreenImage) {
       setStatus('Seçim alanı veya yakalanan ekran resmi bulunamadı');
+      hideSelectionOverlay();
+      resetSelectionSession();
       return;
     }
 
@@ -507,17 +663,21 @@ async function captureAndSend(): Promise<void> {
 
     if (clampedRect.width <= 0 || clampedRect.height <= 0) {
       setStatus('Geçersiz seçim alanı');
+      hideSelectionOverlay();
+      resetSelectionSession();
       return;
     }
 
-    hideSelectionOverlay();
-
     const croppedImage = cropImageToSelection(capturedScreenImage, clampedRect, display);
+
+    // Reset selection session immediately so the user gets control back
+    hideSelectionOverlay();
+    resetSelectionSession();
 
     clipboard.writeImage(croppedImage);
 
     const windowInstance = await openGeminiWindow();
-    const composerFocused = await focusGeminiComposer(windowInstance);
+    const composerFocused = await focusGeminiComposer(windowInstance, settings.prompt);
 
     sendPasteShortcut(windowInstance);
 
@@ -525,10 +685,11 @@ async function captureAndSend(): Promise<void> {
       `Seçilen alan Gemini web'e kopyalandı. ${composerFocused ? 'Yapıştırma denendi.' : 'Yapıştırma kısayolu gönderildi.'}`
     );
     setStatus("Seçilen görsel Gemini web'e yapıştırıldı");
-    resetSelectionSession();
   } catch (error: any) {
     setResponse(`Hata: ${error.message}`);
     setStatus('Seçim veya yapıştırma sırasında hata');
+    hideSelectionOverlay();
+    resetSelectionSession();
   }
 }
 
@@ -536,6 +697,8 @@ async function captureAndSendToSupabase(): Promise<void> {
   try {
     if (!selectionRect || !selectionDisplay || !capturedScreenImage) {
       setStatus('Seçim alanı veya yakalanan ekran resmi bulunamadı');
+      hideSelectionOverlay();
+      resetSelectionSession();
       return;
     }
 
@@ -553,14 +716,18 @@ async function captureAndSendToSupabase(): Promise<void> {
 
     if (clampedRect.width <= 0 || clampedRect.height <= 0) {
       setStatus('Geçersiz seçim alanı');
+      hideSelectionOverlay();
+      resetSelectionSession();
       return;
     }
 
-    hideSelectionOverlay();
-    setStatus("Görsel Supabase'e yükleniyor...");
-
     const croppedImage = cropImageToSelection(capturedScreenImage, clampedRect, display);
     const pngBuffer = croppedImage.toPNG();
+
+    // Reset selection session immediately so the user gets control back
+    hideSelectionOverlay();
+    resetSelectionSession();
+    setStatus("Görsel Supabase'e yükleniyor...");
 
     const bucket = settings.supabaseBucket || 'screenshots';
     const fileName = `screenshot_${Date.now()}.png`;
@@ -585,11 +752,11 @@ async function captureAndSendToSupabase(): Promise<void> {
 
     setResponse(`Supabase'e başarıyla yüklendi!\nGörsel Adresi:\n${publicUrlData.publicUrl}`);
     setStatus('Seçilen görsel telefona gönderildi (Supabase)');
-    resetSelectionSession();
   } catch (error: any) {
     console.error('Supabase upload error:', error);
     setResponse(`Hata: ${error.message}`);
     setStatus('Supabase yükleme hatası');
+    hideSelectionOverlay();
     resetSelectionSession();
   }
 }
@@ -599,6 +766,7 @@ ipcMain.handle('app-ready', () => ({
   supabaseUrl: settings.supabaseUrl,
   supabaseKey: settings.supabaseKey,
   supabaseBucket: settings.supabaseBucket,
+  autoCopyFromPhone: settings.autoCopyFromPhone,
   selectionActive,
 }));
 
@@ -626,14 +794,18 @@ ipcMain.handle('save-settings', (_, nextSettings: Partial<AppSettings>) => {
     supabaseUrl: nextSettings.supabaseUrl ?? settings.supabaseUrl,
     supabaseKey: nextSettings.supabaseKey ?? settings.supabaseKey,
     supabaseBucket: nextSettings.supabaseBucket ?? settings.supabaseBucket,
+    autoCopyFromPhone: nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone,
   });
 
   supabaseClient = null;
   supabaseClientUrl = '';
 
   saveSettingsToFile();
+  setupPhoneSyncPolling();
   return { ok: true };
 });
+
+
 
 ipcMain.handle('open-gemini', async () => {
   const windowInstance = await openGeminiWindow();
@@ -689,6 +861,119 @@ ipcMain.handle('cancel-selection', () => {
   return { ok: true };
 });
 
+ipcMain.handle('confirm-selection-gemini', async () => {
+  if (selectionActive && selectionRect) {
+    await captureAndSend();
+    return { ok: true };
+  }
+  return { ok: false };
+});
+
+ipcMain.handle('confirm-selection-phone', async () => {
+  if (selectionActive && selectionRect) {
+    await captureAndSendToSupabase();
+    return { ok: true };
+  }
+  return { ok: false };
+});
+
+ipcMain.handle('get-storage-usage', async () => {
+  if (!supabaseClient || !settings.supabaseBucket) {
+    return { ok: false, error: 'Supabase client not initialized' };
+  }
+  try {
+    const bucket = settings.supabaseBucket;
+    
+    // List all files in the root of the bucket
+    const { data: files, error } = await supabaseClient.storage.from(bucket).list('', {
+      limit: 1000,
+    });
+    if (error) throw error;
+    
+    let totalBytes = 0;
+    if (files) {
+      for (const f of files) {
+        if (f.name !== 'to_pc' && f.metadata && f.metadata.size) {
+          totalBytes += f.metadata.size;
+        }
+      }
+    }
+    
+    // List to_pc files too
+    let toPcFiles: any[] = [];
+    try {
+      const { data: toPc, error: toPcError } = await supabaseClient.storage.from(bucket).list('to_pc', {
+        limit: 1000,
+      });
+      if (!toPcError && toPc) toPcFiles = toPc;
+    } catch (_) {}
+
+    for (const f of toPcFiles) {
+      if (f.metadata && f.metadata.size) {
+        totalBytes += f.metadata.size;
+      }
+    }
+    
+    const limitBytes = 1024 * 1024 * 1024; // 1 GB
+    return {
+      ok: true,
+      usedBytes: totalBytes,
+      limitBytes: limitBytes,
+      usedPercentage: (totalBytes / limitBytes) * 100
+    };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('purge-storage', async () => {
+  if (!supabaseClient || !settings.supabaseBucket) {
+    return { ok: false, error: 'Supabase client not initialized' };
+  }
+  try {
+    const bucket = settings.supabaseBucket;
+    
+    // 1. List files in root
+    const { data: rootFiles, error: rootError } = await supabaseClient.storage.from(bucket).list('', {
+      limit: 1000,
+    });
+    if (rootError) throw rootError;
+
+    const filesToDelete: string[] = [];
+    if (rootFiles) {
+      for (const f of rootFiles) {
+        if (f.name !== 'to_pc' && f.name !== '.keep' && !f.name.startsWith('.')) {
+          filesToDelete.push(f.name);
+        }
+      }
+    }
+
+    // 2. List files in to_pc
+    let toPcFiles: any[] = [];
+    try {
+      const { data: toPc, error: toPcError } = await supabaseClient.storage.from(bucket).list('to_pc', {
+        limit: 1000,
+      });
+      if (!toPcError && toPc) toPcFiles = toPc;
+    } catch (_) {}
+
+    for (const f of toPcFiles) {
+      if (f.name !== '.keep' && !f.name.startsWith('.')) {
+        filesToDelete.push(`to_pc/${f.name}`);
+      }
+    }
+
+    if (filesToDelete.length > 0) {
+      const { error: removeError } = await supabaseClient.storage.from(bucket).remove(filesToDelete);
+      if (removeError) throw removeError;
+    }
+
+    return { ok: true, deletedCount: filesToDelete.length };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── Auto-updater ────────────────────────────────────────────────────────────
 autoUpdater.on('checking-for-update', () => {
   console.log('Checking for update...');
@@ -711,6 +996,7 @@ app.whenReady().then(() => {
   createMainWindow();
   createOverlayWindow();
   startKeyListener();
+  setupPhoneSyncPolling();
 
   setTimeout(() => {
     ensureGeminiWindowLoaded();
@@ -732,6 +1018,7 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   stopKeyListener();
+  stopPhoneSyncPolling();
 });
 
 app.on('window-all-closed', () => {

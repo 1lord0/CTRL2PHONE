@@ -12,9 +12,28 @@
   </head>
   <body class="overlay-body">
     <div class="overlay-instructions">
-      <div id="overlayText">Alanı fareyle seç. X veya Enter ile gönder, Esc ile iptal et.</div>
+      <div id="overlayText">
+        <span>Ekranı sürükleyerek alan seçin.</span>
+      </div>
+      <div class="shortcuts-hint">
+        <span class="shortcut-tag"><kbd>ENTER</kbd> / <kbd>X</kbd> Gemini</span>
+        <span class="shortcut-tag"><kbd>M</kbd> Telefon</span>
+        <span class="shortcut-tag"><kbd>ESC</kbd> İptal</span>
+      </div>
     </div>
-    <div id="selectionBox" class="selection-box hidden"></div>
+    <div id="selectionBox" class="selection-box hidden">
+      <div id="actionBar" class="action-bar hidden">
+        <button class="action-btn gemini" id="btnGemini" title="Seçimi Gemini'a gönderir (X veya Enter)">
+          <span class="btn-icon">✧</span> Gemini
+        </button>
+        <button class="action-btn phone" id="btnPhone" title="Seçimi telefona gönderir (M)">
+          <span class="btn-icon">📱</span> Telefon
+        </button>
+        <button class="action-btn cancel" id="btnCancel" title="İptal et (Esc)">
+          <span class="btn-icon">✕</span> İptal
+        </button>
+      </div>
+    </div>
     <script src="./overlay.js"></script>
   </body>
 </html>

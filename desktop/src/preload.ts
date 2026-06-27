@@ -15,6 +15,10 @@ const bridge: BridgeAPI = {
   onOverlayState: (callback) => ipcRenderer.on('overlay-state', (_, state) => callback(state)),
   onOverlayMessage: (callback) =>
     ipcRenderer.on('overlay-message', (_, message) => callback(message)),
+  confirmSelectionGemini: () => ipcRenderer.invoke('confirm-selection-gemini'),
+  confirmSelectionPhone: () => ipcRenderer.invoke('confirm-selection-phone'),
+  getStorageUsage: () => ipcRenderer.invoke('get-storage-usage'),
+  purgeStorage: () => ipcRenderer.invoke('purge-storage'),
 };
 
 contextBridge.exposeInMainWorld('bridge', bridge);
