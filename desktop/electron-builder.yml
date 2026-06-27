@@ -13,6 +13,8 @@ files:
 extraResources:
   - from: src/key_listener.exe
     to: src/key_listener.exe
+  - from: src/photo_dropper.exe
+    to: src/photo_dropper.exe
 # win:
 #   target:
 #     - nsis

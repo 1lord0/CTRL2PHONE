@@ -134,15 +134,28 @@ async function checkPhoneSync(): Promise<void> {
     }
 
     if (downloadedLocalPaths.length > 0) {
-      // Launch Spotlight-style floating photo dropper C# executable with all paths
-      const dropperPath = path.join(app.getAppPath(), 'src', 'photo_dropper.exe');
-      if (fs.existsSync(dropperPath)) {
+      const possibleDropperPaths = [
+        path.join(process.resourcesPath, 'src', 'photo_dropper.exe'),
+        path.join(process.resourcesPath, 'photo_dropper.exe'),
+        path.join(__dirname, 'photo_dropper.exe'),
+        path.join(__dirname, '..', 'src', 'photo_dropper.exe'),
+        path.join(app.getAppPath(), 'src', 'photo_dropper.exe'),
+      ];
+      let dropperPath = '';
+      for (const p of possibleDropperPaths) {
+        if (fs.existsSync(p)) {
+          dropperPath = p;
+          break;
+        }
+      }
+
+      if (dropperPath) {
         spawn(dropperPath, downloadedLocalPaths, {
           detached: true,
           stdio: 'ignore'
         }).unref();
       } else {
-        console.error('[Phone Sync] photo_dropper.exe not found at:', dropperPath);
+        console.error('[Phone Sync] photo_dropper.exe not found at paths:', possibleDropperPaths.join(', '));
       }
 
       const { Notification } = require('electron');
