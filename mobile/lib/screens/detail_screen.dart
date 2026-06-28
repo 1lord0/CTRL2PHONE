@@ -36,7 +36,6 @@ class DetailScreen extends StatefulWidget {
 class _DetailScreenState extends State<DetailScreen> {
   late PageController _pageController;
   late int _currentIndex;
-  final SupabaseService _service = SupabaseService();
 
   // Zoom kontrolü
   final PhotoViewComputedScale _minScale = PhotoViewComputedScale.contained;
@@ -64,7 +63,6 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   Widget build(BuildContext context) {
     final currentPhoto = widget.photos[_currentIndex];
-    final imageUrl = _service.getPhotoUrl(currentPhoto.storagePath);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -103,7 +101,7 @@ class _DetailScreenState extends State<DetailScreen> {
             scrollPhysics: const BouncingScrollPhysics(),
             builder: (context, index) {
               final photo = widget.photos[index];
-              final url = _service.getPhotoUrl(photo.storagePath);
+              final url = photo.url;
 
               return PhotoViewGalleryPageOptions(
                 imageProvider: CachedNetworkImageProvider(url),
@@ -223,8 +221,9 @@ class _DetailScreenState extends State<DetailScreen> {
         }
       }
 
-      final urlStr = _service.getPhotoUrl(photo.storagePath);
-      final url = Uri.parse('$urlStr?t=${DateTime.now().millisecondsSinceEpoch}');
+      // Signed URL zaten benzersiz token taşır; ayrı cache-buster eklemek
+      // bağlantıyı bozar (çift '?'). Doğrudan kullan.
+      final url = Uri.parse(photo.url);
       final response = await http.get(url);
 
       if (response.statusCode != 200) {

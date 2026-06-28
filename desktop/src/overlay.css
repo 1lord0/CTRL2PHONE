@@ -13,7 +13,12 @@ body {
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><circle cx='9' cy='9' r='7' stroke='%233b82f6' stroke-width='2' fill='none'/></svg>")
       9 9,
     crosshair;
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+  font-family:
+    'Segoe UI',
+    -apple-system,
+    BlinkMacSystemFont,
+    Roboto,
+    sans-serif;
 }
 
 body.overlay-body {
@@ -87,8 +92,8 @@ kbd {
   border: 2px solid #3b82f6;
   background: transparent;
   /* Box-shadow dims the outside screen area while keeping selected region clear */
-  box-shadow: 
-    0 0 0 9999px rgba(15, 23, 42, 0.65), 
+  box-shadow:
+    0 0 0 9999px rgba(15, 23, 42, 0.65),
     0 0 12px rgba(59, 130, 246, 0.4) inset,
     0 0 8px rgba(59, 130, 246, 0.3);
   pointer-events: none;
@@ -110,7 +115,9 @@ kbd {
   pointer-events: auto; /* IMPORTANT: Enables button clicks inside the pointer-events: none parent */
   opacity: 1;
   transform: translateY(0);
-  transition: opacity 0.2s, transform 0.2s;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
 }
 
 .action-btn {
@@ -147,7 +154,7 @@ kbd {
 }
 
 .action-btn.gemini:hover {
-  background: rgba(59, 130, 246, 1.0);
+  background: rgba(59, 130, 246, 1);
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
   color: #ffffff;
 }
@@ -162,6 +169,66 @@ kbd {
   background: rgba(239, 68, 68, 0.15);
   border-color: rgba(239, 68, 68, 0.4);
   color: #ef4444;
+}
+
+/* ── Annotation layer ──────────────────────────────────────────── */
+.annotation-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  /* Above the selection-box dimming (z 1000) so strokes stay crisp, below the
+     instructions/toolbar. Never captures the mouse — the window handlers draw. */
+  z-index: 1500;
+  pointer-events: none;
+}
+
+.annotation-toolbar {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 10000;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+
+.tool-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tool-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.tool-btn.active {
+  background: rgba(59, 130, 246, 0.9);
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+body.overlay-body.annotating {
+  cursor: crosshair;
 }
 
 .hidden {

@@ -163,8 +163,12 @@ namespace PhotoDropper
                 {
                     byte[] bytes = File.ReadAllBytes(path);
                     using (var ms = new MemoryStream(bytes))
+                    using (var tmp = Image.FromStream(ms))
                     {
-                        pb.Image = Image.FromStream(ms);
+                        // Copy into an independent Bitmap so the PictureBox doesn't
+                        // depend on the soon-to-be-disposed stream (GDI+ requires the
+                        // source stream to stay open otherwise).
+                        pb.Image = new Bitmap(tmp);
                     }
                 }
                 catch (Exception ex)

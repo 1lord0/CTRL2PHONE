@@ -1,82 +1,210 @@
 <!doctype html>
 <html lang="tr">
-	<head>
-		<meta charset="UTF-8" />
-		<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src https://generativelanguage.googleapis.com; img-src 'self' data:;" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Gemini Ekran Yakalama</title>
-		<link rel="stylesheet" href="./src/styles.css" />
-	</head>
-	<body>
-		<main class="shell">
-			<section class="hero">
-			<p class="eyebrow">Windows ekran aracı</p>
-			<h1>Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
-			<p class="lede">
-				İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra: X veya Enter ile Gemini'a, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna basın. Q ile çık.
-			</p>
-			<p class="lede" style="margin-top: 8px; color: #60a5fa; font-weight: 600;">
-				📋 Ctrl+Shift+V → Panodaki metni/linki anında telefona gönderir
-			</p>
-		</section>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src https://generativelanguage.googleapis.com; img-src 'self' data:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini Ekran Yakalama</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Windows ekran aracı</p>
+        <h1>Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
+        <p class="lede">
+          İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra:
+          X veya Enter ile Gemini'a, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna
+          basın. Q ile çık.
+        </p>
+      </section>
 
-			<section class="card grid">
-				<label class="span-2">
-					<span>Gemini için kısa not</span>
-					<textarea id="prompt" rows="3" placeholder="İstersen görüntüyle birlikte kullanılacak kısa bir not yaz."></textarea>
-				</label>
+      <section class="card grid">
+        <label class="span-2">
+          <span>Gemini için kısa not</span>
+          <textarea
+            id="prompt"
+            rows="3"
+            placeholder="İstersen görüntüyle birlikte kullanılacak kısa bir not yaz."
+          ></textarea>
+        </label>
 
-				<label>
-					<span>Supabase URL</span>
-					<input type="text" id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
-				</label>
+        <label>
+          <span>Supabase URL</span>
+          <input type="text" id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
+        </label>
 
-				<label>
-					<span>Supabase Anon Key</span>
-					<input type="password" id="supabaseKey" placeholder="Supabase Anon Key (Service Key kullanmayın)" />
-				</label>
+        <label>
+          <span>Supabase Anon Key</span>
+          <input
+            type="password"
+            id="supabaseKey"
+            placeholder="Supabase Anon Key (Service Key kullanmayın)"
+          />
+        </label>
 
-				<label class="span-2">
-					<span>Supabase Bucket Name</span>
-					<input type="text" id="supabaseBucket" placeholder="screenshots" />
-				</label>
+        <label class="span-2">
+          <span>Supabase Bucket Name</span>
+          <input type="text" id="supabaseBucket" placeholder="screenshots" />
+        </label>
 
-				<label class="span-2" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; margin-top: 5px;">
-					<input type="checkbox" id="autoCopyFromPhone" checked style="width: auto; cursor: pointer;" />
-					<span>Telefondan gelen görselleri otomatik panoya kopyala</span>
-				</label>
+        <label
+          class="span-2"
+          style="
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+            margin-top: 5px;
+          "
+        >
+          <input
+            type="checkbox"
+            id="autoCopyFromPhone"
+            checked
+            style="width: auto; cursor: pointer"
+          />
+          <span>Telefondan gelen görselleri otomatik panoya kopyala</span>
+        </label>
 
-				<div class="storage-usage-container span-2" style="margin-top: 10px; display: none;" id="storageContainer">
-					<div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; margin-bottom: 6px; color: #f8fafc;">
-						<span>Supabase Bulut Depolama</span>
-						<span id="storageText" style="color: #94a3b8;">0.0 MB / 1024 MB (0.0%)</span>
-					</div>
-					<div style="width: 100%; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05);">
-						<div id="storageBar" style="width: 0%; height: 100%; background: #3b82f6; border-radius: 4px; transition: width 0.3s ease, background-color 0.3s ease;"></div>
-					</div>
-				</div>
+        <label>
+          <span>Kısayol tuşu (çift bas)</span>
+          <select id="hotkeyVk">
+            <option value="162">Sol Ctrl</option>
+            <option value="163">Sağ Ctrl</option>
+            <option value="164">Sol Alt</option>
+            <option value="165">Sağ Alt</option>
+            <option value="160">Sol Shift</option>
+            <option value="161">Sağ Shift</option>
+          </select>
+        </label>
 
-				<div class="qr-container span-2" style="display: flex; flex-direction: column; align-items: center; margin-top: 10px; gap: 8px;">
-					<span style="font-size: 12px; color: #94a3b8;">Telefonda Ayarlardan QR ile Eşitlemek İçin:</span>
-					<img id="qrCodeImage" style="width: 140px; height: 140px; display: none; border-radius: 8px; border: 4px solid white;" />
-				</div>
+        <label>
+          <span>Çift basış süresi (ms)</span>
+          <input type="number" id="doublePressMs" min="200" max="1000" step="50" value="400" />
+        </label>
 
-				<div class="actions span-2" style="display: flex; gap: 12px; margin-top: 5px;">
-				<button id="saveSettings" style="flex: 2;">Ayarları kaydet</button>
-				<button id="sendClipboard" style="flex: 1; background: rgba(96, 165, 250, 0.12); border: 1px solid rgba(96, 165, 250, 0.3); color: #60a5fa; font-weight: bold; cursor: pointer; transition: all 0.2s;">📋 Telefona Gönder</button>
-				<button id="purgeStorage" style="flex: 1; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; font-weight: bold; cursor: pointer; transition: all 0.2s;">Bulutu Temizle</button>
-			</div>
-			</section>
+        <div
+          class="storage-usage-container span-2"
+          style="margin-top: 10px; display: none"
+          id="storageContainer"
+        >
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              font-size: 12px;
+              font-weight: bold;
+              margin-bottom: 6px;
+              color: #f8fafc;
+            "
+          >
+            <span>Supabase Bulut Depolama</span>
+            <span id="storageText" style="color: #94a3b8">0.0 MB / 1024 MB (0.0%)</span>
+          </div>
+          <div
+            style="
+              width: 100%;
+              height: 8px;
+              background: #1e293b;
+              border-radius: 4px;
+              overflow: hidden;
+              border: 1px solid rgba(255, 255, 255, 0.05);
+            "
+          >
+            <div
+              id="storageBar"
+              style="
+                width: 0%;
+                height: 100%;
+                background: #3b82f6;
+                border-radius: 4px;
+                transition:
+                  width 0.3s ease,
+                  background-color 0.3s ease;
+              "
+            ></div>
+          </div>
+        </div>
 
-			<section class="card status-card">
-				<div class="status-line">
-					<span>Durum</span>
-					<strong id="status">Hazır</strong>
-				</div>
-				<pre id="response" class="response">Gemini cevabı burada görünecek.</pre>
-			</section>
-		</main>
+        <div
+          class="qr-container span-2"
+          style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 10px;
+            gap: 8px;
+          "
+        >
+          <span style="font-size: 12px; color: #94a3b8"
+            >Telefonda Ayarlardan QR ile Eşitlemek İçin:</span
+          >
+          <img
+            id="qrCodeImage"
+            style="
+              width: 140px;
+              height: 140px;
+              display: none;
+              border-radius: 8px;
+              border: 4px solid white;
+            "
+          />
+        </div>
 
-		<script src="./src/renderer.js"></script>
-	</body>
+        <div class="actions span-2" style="display: flex; gap: 12px; margin-top: 5px">
+          <button id="saveSettings" style="flex: 2">Ayarları kaydet</button>
+          <button
+            id="purgeStorage"
+            style="
+              flex: 1;
+              background: rgba(239, 68, 68, 0.12);
+              border: 1px solid rgba(239, 68, 68, 0.3);
+              color: #f87171;
+              font-weight: bold;
+              cursor: pointer;
+              transition: all 0.2s;
+            "
+          >
+            Bulutu Temizle
+          </button>
+        </div>
+
+        <button
+          id="setupRls"
+          class="span-2"
+          style="
+            margin-top: 8px;
+            background: rgba(59, 130, 246, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #93c5fd;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+          "
+        >
+          🔒 Güvenli Kurulum: RLS SQL'ini kopyala &amp; Supabase'i aç
+        </button>
+        <p class="span-2" style="font-size: 11px; color: #94a3b8; margin: -2px 0 0">
+          Tek seferlik: butona bas → SQL panoya kopyalanır ve Supabase SQL Editör açılır →
+          yapıştırıp <strong>Run</strong> de. Bucket'ı gizli yapar, anon anahtarını yalnızca bu
+          bucket ile sınırlar.
+        </p>
+      </section>
+
+      <section class="card status-card">
+        <div class="status-line">
+          <span>Durum</span>
+          <strong id="status">Hazır</strong>
+        </div>
+        <pre id="response" class="response">Gemini cevabı burada görünecek.</pre>
+      </section>
+    </main>
+
+    <script src="./src/renderer.js"></script>
+  </body>
 </html>

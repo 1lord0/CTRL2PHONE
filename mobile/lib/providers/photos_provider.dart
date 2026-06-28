@@ -33,10 +33,10 @@ class PhotosProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final photos = await _service.getPhotos(limit: _limit, offset: _offset);
-      _photos.addAll(photos);
-      _hasMore = photos.length == _limit;
-      _offset += photos.length;
+      final page = await _service.getPhotos(limit: _limit, offset: _offset);
+      _photos.addAll(page.photos);
+      _hasMore = page.hasMore;
+      _offset += page.fetchedCount;
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -61,5 +61,28 @@ class PhotosProvider extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  /// Start live updates: refresh the gallery the instant the desktop uploads a
+  /// new screenshot (Realtime push instead of manual pull-to-refresh).
+  void listenForNewPhotos() {
+    _service.listenForBucketInserts((name) {
+      final base = name.split('/').last;
+      // A new root object (not the to_pc/ outbox, not a hidden file) is a fresh
+      // screenshot coming from the desktop.
+      if (!name.startsWith('to_pc/') && !base.startsWith('.')) {
+        refresh();
+      }
+    });
+  }
+
+  void stopRealtime() {
+    _service.stopBucketListener();
+  }
+
+  @override
+  void dispose() {
+    stopRealtime();
+    super.dispose();
   }
 }

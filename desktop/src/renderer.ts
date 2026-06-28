@@ -3,6 +3,8 @@ const supabaseUrlInput = document.getElementById('supabaseUrl') as HTMLInputElem
 const supabaseKeyInput = document.getElementById('supabaseKey') as HTMLInputElement;
 const supabaseBucketInput = document.getElementById('supabaseBucket') as HTMLInputElement;
 const autoCopyFromPhoneInput = document.getElementById('autoCopyFromPhone') as HTMLInputElement;
+const hotkeyVkInput = document.getElementById('hotkeyVk') as HTMLSelectElement;
+const doublePressMsInput = document.getElementById('doublePressMs') as HTMLInputElement;
 const statusNode = document.getElementById('status') as HTMLElement;
 const responseNode = document.getElementById('response') as HTMLElement;
 const qrCodeImage = document.getElementById('qrCodeImage') as HTMLImageElement;
@@ -29,14 +31,18 @@ async function updateQrCode(): Promise<void> {
 async function updateStorageUsage(): Promise<void> {
   try {
     const result = await window.bridge.getStorageUsage();
-    if (result?.ok && typeof result.usedBytes === 'number' && typeof result.limitBytes === 'number') {
+    if (
+      result?.ok &&
+      typeof result.usedBytes === 'number' &&
+      typeof result.limitBytes === 'number'
+    ) {
       const usedMb = result.usedBytes / (1024 * 1024);
       const limitMb = result.limitBytes / (1024 * 1024);
       const pct = result.usedPercentage ?? 0;
-      
+
       storageText.textContent = `${usedMb.toFixed(1)} MB / ${limitMb.toFixed(0)} MB (${pct.toFixed(1)}%)`;
       storageBar.style.width = `${Math.min(pct, 100)}%`;
-      
+
       if (pct > 90) {
         storageBar.style.backgroundColor = '#ef4444'; // Red
       } else if (pct > 75) {
@@ -44,7 +50,7 @@ async function updateStorageUsage(): Promise<void> {
       } else {
         storageBar.style.backgroundColor = '#3b82f6'; // Blue
       }
-      
+
       storageContainer.style.display = 'block';
     } else {
       storageContainer.style.display = 'none';
@@ -62,6 +68,12 @@ function loadSettings(state: any): void {
   supabaseBucketInput.value = state.supabaseBucket || 'screenshots';
   if (autoCopyFromPhoneInput) {
     autoCopyFromPhoneInput.checked = state.autoCopyFromPhone !== false;
+  }
+  if (hotkeyVkInput) {
+    hotkeyVkInput.value = String(state.hotkeyVk ?? 162);
+  }
+  if (doublePressMsInput) {
+    doublePressMsInput.value = String(state.doublePressMs ?? 400);
   }
   statusNode.textContent = state.selectionActive ? 'Seçim modu açık' : 'Hazır';
   updateQrCode();
@@ -94,6 +106,13 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
     supabaseKey: supabaseKeyInput.value.trim(),
     supabaseBucket: supabaseBucketInput.value.trim() || 'screenshots',
     autoCopyFromPhone: autoCopyFromPhoneInput ? autoCopyFromPhoneInput.checked : true,
+    hotkeyVk: parseInt(hotkeyVkInput?.value ?? '162', 10) || 162,
+    // Clamp to the range the C# listener accepts so the persisted/displayed value
+    // can never diverge from the threshold actually in effect.
+    doublePressMs: Math.min(
+      2000,
+      Math.max(100, parseInt(doublePressMsInput?.value ?? '400', 10) || 400)
+    ),
   };
 
   const result = await window.bridge.saveSettings(payload);
@@ -102,6 +121,26 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
     statusNode.textContent = 'Ayarlar kaydedildi';
     updateQrCode();
     updateStorageUsage();
+  }
+});
+
+document.getElementById('setupRls')?.addEventListener('click', async () => {
+  statusNode.textContent = 'RLS SQL panoya kopyalanıyor...';
+  try {
+    const result = await window.bridge.setupRls();
+    if (result?.ok) {
+      statusNode.textContent =
+        "RLS SQL panoya kopyalandı. Açılan Supabase SQL Editör'e yapıştırıp Run deyin.";
+      if (result.sql) {
+        responseNode.textContent =
+          "Aşağıdaki SQL panoya kopyalandı — Supabase SQL Editör'e yapıştırıp Run deyin:\n\n" +
+          result.sql;
+      }
+    } else {
+      statusNode.textContent = `RLS kurulum hatası: ${result?.error || 'Bilinmeyen hata'}`;
+    }
+  } catch (e: any) {
+    statusNode.textContent = `Hata: ${e.message}`;
   }
 });
 
@@ -119,18 +158,6 @@ document.getElementById('purgeStorage')?.addEventListener('click', async () => {
       updateStorageUsage();
     } else {
       statusNode.textContent = `Temizlik hatası: ${result?.error || 'Bilinmeyen hata'}`;
-    }
-  } catch (e: any) {
-    statusNode.textContent = `Hata: ${e.message}`;
-  }
-});
-
-document.getElementById('sendClipboard')?.addEventListener('click', async () => {
-  statusNode.textContent = 'Metin telefona gönderiliyor...';
-  try {
-    const result = await window.bridge.sendClipboard();
-    if (!result?.ok) {
-      statusNode.textContent = `Gönderim hatası: ${result?.error || 'Bilinmeyen hata'}`;
     }
   } catch (e: any) {
     statusNode.textContent = `Hata: ${e.message}`;

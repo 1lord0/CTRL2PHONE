@@ -5,20 +5,110 @@ const btnGemini = document.getElementById('btnGemini') as HTMLButtonElement;
 const btnPhone = document.getElementById('btnPhone') as HTMLButtonElement;
 const btnCancel = document.getElementById('btnCancel') as HTMLButtonElement;
 
+// ── Annotation layer ─────────────────────────────────────────────
+const annotationCanvas = document.getElementById('annotationCanvas') as HTMLCanvasElement;
+const actx = annotationCanvas.getContext('2d') as CanvasRenderingContext2D;
+const toolbarEl = document.getElementById('annotationToolbar') as HTMLElement;
+const toolButtons: Record<string, HTMLButtonElement> = {
+  pen: document.getElementById('toolPen') as HTMLButtonElement,
+  box: document.getElementById('toolBox') as HTMLButtonElement,
+  redact: document.getElementById('toolRedact') as HTMLButtonElement,
+};
+const btnColor = document.getElementById('toolColor') as HTMLButtonElement;
+const btnUndo = document.getElementById('toolUndo') as HTMLButtonElement;
+const btnClear = document.getElementById('toolClear') as HTMLButtonElement;
+
+type Tool = 'pen' | 'box' | 'redact';
+type Pt = { x: number; y: number };
+type Box = { x: number; y: number; width: number; height: number };
+type Annotation =
+  | { type: 'pen'; color: string; points: Pt[] }
+  | { type: 'box'; color: string; rect: Box }
+  | { type: 'redact'; rect: Box };
+
 let active = false;
 let dragging = false;
-let startPoint: { x: number; y: number } | null = null;
-let currentRect: { x: number; y: number; width: number; height: number } | null = null;
+let startPoint: Pt | null = null;
+let currentRect: Box | null = null;
 
-function renderSelection(
-  rect: { x: number; y: number; width: number; height: number } | null
-): void {
+let currentTool: Tool | null = null;
+let currentColor = '#ff3b30';
+const annotations: Annotation[] = [];
+let drawing = false;
+let drawStart: Pt | null = null;
+let liveStroke: Pt[] | null = null;
+let annotatedFlag = false;
+let bgDataUrl: string | null = null;
+
+function boxFrom(a: Pt, b: Pt): Box {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(a.x - b.x),
+    height: Math.abs(a.y - b.y),
+  };
+}
+
+function syncAnnotatedFlag(): void {
+  const has = annotations.length > 0;
+  if (has !== annotatedFlag) {
+    annotatedFlag = has;
+    window.bridge.setAnnotated(has);
+  }
+}
+
+function drawOne(ctx: CanvasRenderingContext2D, a: Annotation): void {
+  if (a.type === 'pen') {
+    ctx.strokeStyle = a.color;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    a.points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.stroke();
+  } else if (a.type === 'box') {
+    ctx.strokeStyle = a.color;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(a.rect.x, a.rect.y, a.rect.width, a.rect.height);
+  } else {
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(a.rect.x, a.rect.y, a.rect.width, a.rect.height);
+  }
+}
+
+function redraw(preview?: Annotation): void {
+  actx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+  for (const a of annotations) drawOne(actx, a);
+  if (preview) drawOne(actx, preview);
+}
+
+function resizeCanvas(): void {
+  annotationCanvas.width = window.innerWidth;
+  annotationCanvas.height = window.innerHeight;
+  redraw();
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function setTool(tool: Tool | null): void {
+  currentTool = tool;
+  for (const key of Object.keys(toolButtons)) {
+    toolButtons[key].classList.toggle('active', key === tool);
+  }
+  document.body.classList.toggle('annotating', tool !== null);
+}
+
+function showToolbarIfReady(): void {
+  toolbarEl.classList.toggle('hidden', !(currentRect && active));
+}
+
+// ── Selection rendering (unchanged behavior) ─────────────────────
+function renderSelection(rect: Box | null): void {
   if (!rect) {
     selectionBox.classList.add('hidden');
     actionBar.classList.add('hidden');
     return;
   }
-
   selectionBox.classList.remove('hidden');
   selectionBox.style.left = `${rect.x}px`;
   selectionBox.style.top = `${rect.y}px`;
@@ -26,29 +116,37 @@ function renderSelection(
   selectionBox.style.height = `${rect.height}px`;
 }
 
-function updateRect(endPoint: {
-  x: number;
-  y: number;
-}): { x: number; y: number; width: number; height: number } | null {
+function updateRect(endPoint: Pt): Box | null {
   if (!startPoint) {
     return null;
   }
-
-  const x = Math.min(startPoint.x, endPoint.x);
-  const y = Math.min(startPoint.y, endPoint.y);
-  const width = Math.abs(endPoint.x - startPoint.x);
-  const height = Math.abs(endPoint.y - startPoint.y);
-
-  return { x, y, width, height };
+  return boxFrom(startPoint, endPoint);
 }
 
+// ── Mouse handling: draw when a tool is active, otherwise select ──
 window.addEventListener('mousemove', (event) => {
   if (!active) {
     return;
   }
+  const p: Pt = { x: event.clientX, y: event.clientY };
+
+  if (currentTool && drawing) {
+    if (currentTool === 'pen' && liveStroke) {
+      liveStroke.push(p);
+      redraw({ type: 'pen', color: currentColor, points: liveStroke });
+    } else if (drawStart) {
+      const r = boxFrom(drawStart, p);
+      redraw(
+        currentTool === 'redact'
+          ? { type: 'redact', rect: r }
+          : { type: 'box', color: currentColor, rect: r }
+      );
+    }
+    return;
+  }
 
   if (dragging) {
-    currentRect = updateRect({ x: event.clientX, y: event.clientY });
+    currentRect = updateRect(p);
     renderSelection(currentRect);
   }
 });
@@ -57,9 +155,15 @@ window.addEventListener('mousedown', (event) => {
   if (!active || event.button !== 0) {
     return;
   }
+  // Clicks on the floating controls must not start a drag/draw.
+  if (actionBar.contains(event.target as Node) || toolbarEl.contains(event.target as Node)) {
+    return;
+  }
 
-  // Check if click was inside the action bar; if so, do not initiate a new drag
-  if (actionBar.contains(event.target as Node)) {
+  if (currentTool) {
+    drawing = true;
+    drawStart = { x: event.clientX, y: event.clientY };
+    liveStroke = currentTool === 'pen' ? [drawStart] : null;
     return;
   }
 
@@ -75,11 +179,36 @@ window.addEventListener('mousedown', (event) => {
 });
 
 window.addEventListener('mouseup', async (event) => {
-  if (!active || event.button !== 0 || !dragging) {
+  if (!active || event.button !== 0) {
     return;
   }
 
-  // Check if click was inside the action bar
+  // Finishing an annotation stroke/shape.
+  if (currentTool && drawing) {
+    drawing = false;
+    const p: Pt = { x: event.clientX, y: event.clientY };
+    if (currentTool === 'pen' && liveStroke && liveStroke.length > 1) {
+      annotations.push({ type: 'pen', color: currentColor, points: liveStroke });
+    } else if (currentTool !== 'pen' && drawStart) {
+      const r = boxFrom(drawStart, p);
+      if (r.width > 2 && r.height > 2) {
+        annotations.push(
+          currentTool === 'redact'
+            ? { type: 'redact', rect: r }
+            : { type: 'box', color: currentColor, rect: r }
+        );
+      }
+    }
+    liveStroke = null;
+    drawStart = null;
+    redraw();
+    syncAnnotatedFlag();
+    return;
+  }
+
+  if (!dragging) {
+    return;
+  }
   if (actionBar.contains(event.target as Node)) {
     dragging = false;
     return;
@@ -91,16 +220,16 @@ window.addEventListener('mouseup', async (event) => {
 
   if (currentRect && currentRect.width > 4 && currentRect.height > 4) {
     await window.bridge.setSelection({ type: 'update', rect: currentRect });
-    overlayText.textContent = 'Seçim hazır. Gönderim modunu seçin:';
-    
-    // Position action bar correctly and make it visible
+    overlayText.textContent = 'Seçim hazır. Çiz (kalem/kutu/karart) ya da gönder:';
     actionBar.classList.remove('hidden');
+    showToolbarIfReady();
   } else {
     currentRect = null;
     startPoint = null;
     renderSelection(null);
     document.body.classList.remove('selecting');
     overlayText.textContent = 'Ekranı sürükleyerek bir alan seçin.';
+    toolbarEl.classList.add('hidden');
   }
 });
 
@@ -108,38 +237,126 @@ window.addEventListener('contextmenu', (event) => {
   event.preventDefault();
 });
 
-// ── Button Event Listeners ───────────────────────────────────────
+// ── Toolbar buttons ──────────────────────────────────────────────
+toolButtons.pen.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setTool(currentTool === 'pen' ? null : 'pen');
+});
+toolButtons.box.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setTool(currentTool === 'box' ? null : 'box');
+});
+toolButtons.redact.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setTool(currentTool === 'redact' ? null : 'redact');
+});
+btnColor.addEventListener('click', (e) => {
+  e.stopPropagation();
+  currentColor =
+    currentColor === '#ff3b30' ? '#ffd60a' : currentColor === '#ffd60a' ? '#34c759' : '#ff3b30';
+  btnColor.style.color = currentColor;
+});
+btnUndo.addEventListener('click', (e) => {
+  e.stopPropagation();
+  annotations.pop();
+  redraw();
+  syncAnnotatedFlag();
+});
+btnClear.addEventListener('click', (e) => {
+  e.stopPropagation();
+  annotations.length = 0;
+  setTool(null);
+  redraw();
+  syncAnnotatedFlag();
+});
+
+// ── Action buttons (unchanged) ───────────────────────────────────
 btnGemini.addEventListener('click', (e) => {
   e.stopPropagation();
   window.bridge.confirmSelectionGemini();
 });
-
 btnPhone.addEventListener('click', (e) => {
   e.stopPropagation();
   window.bridge.confirmSelectionPhone();
 });
-
 btnCancel.addEventListener('click', (e) => {
   e.stopPropagation();
   window.bridge.cancelSelection();
 });
 
-// ── Bridge State Updates ─────────────────────────────────────────
+// ── Composite the selection + annotations into a PNG for main ────
+window.__ctrl2phoneCompose = () => {
+  return new Promise<string | null>((resolve) => {
+    if (!currentRect || annotations.length === 0 || !bgDataUrl) {
+      resolve(null);
+      return;
+    }
+    const r = currentRect;
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scaleX = img.naturalWidth / window.innerWidth;
+        const scaleY = img.naturalHeight / window.innerHeight;
+        const w = Math.max(1, Math.round(r.width * scaleX));
+        const h = Math.max(1, Math.round(r.height * scaleY));
+        const out = document.createElement('canvas');
+        out.width = w;
+        out.height = h;
+        const octx = out.getContext('2d') as CanvasRenderingContext2D;
+        // 1) the selection region of the frozen background
+        octx.drawImage(
+          img,
+          r.x * scaleX,
+          r.y * scaleY,
+          r.width * scaleX,
+          r.height * scaleY,
+          0,
+          0,
+          w,
+          h
+        );
+        // 2) the same region of the annotation canvas, burned on top
+        octx.drawImage(annotationCanvas, r.x, r.y, r.width, r.height, 0, 0, w, h);
+        resolve(out.toDataURL('image/png'));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = bgDataUrl;
+  });
+};
+
+// ── Bridge state ─────────────────────────────────────────────────
 window.bridge.onOverlayState((state) => {
   active = Boolean(state?.active);
   selectionBox.classList.toggle('hidden', !state?.visible);
 
+  // Ensure the annotation canvas matches the (just-resized) window size; the
+  // window 'resize' event is unreliable across hide/show.
+  if (active) {
+    resizeCanvas();
+  }
+
   if (state?.backgroundImage) {
+    bgDataUrl = state.backgroundImage;
     document.body.style.backgroundImage = `url("${state.backgroundImage}")`;
   } else {
+    bgDataUrl = null;
     document.body.style.backgroundImage = 'none';
   }
 
   if (!active) {
+    // Session ended — clear everything, including annotations.
     dragging = false;
     startPoint = null;
     document.body.classList.remove('selecting');
     actionBar.classList.add('hidden');
+    toolbarEl.classList.add('hidden');
+    annotations.length = 0;
+    annotatedFlag = false;
+    setTool(null);
+    redraw();
   }
 
   if (state?.selection) {
@@ -147,10 +364,14 @@ window.bridge.onOverlayState((state) => {
     renderSelection(currentRect);
     document.body.classList.add('selecting');
     actionBar.classList.remove('hidden');
+    showToolbarIfReady();
   } else if (!dragging) {
     currentRect = null;
     renderSelection(null);
     actionBar.classList.add('hidden');
+    if (!active) {
+      toolbarEl.classList.add('hidden');
+    }
   }
 });
 

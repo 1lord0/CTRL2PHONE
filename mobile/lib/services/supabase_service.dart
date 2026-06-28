@@ -1,7 +1,5 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
@@ -11,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class SupabaseService {
   static SupabaseClient? _clientInstance;
   static String? _bucketName;
+  static RealtimeChannel? _galleryChannel;
 
   static bool get isInitialized => _clientInstance != null;
 
@@ -20,15 +19,55 @@ class SupabaseService {
   }
 
   static void clearClient() {
+    final ch = _galleryChannel;
+    if (ch != null) {
+      _clientInstance?.removeChannel(ch);
+      _galleryChannel = null;
+    }
     _clientInstance = null;
     _bucketName = null;
+  }
+
+  /// Live updates: subscribe to INSERTs on this bucket's storage.objects so the
+  /// gallery refreshes the instant the desktop uploads a screenshot. Requires
+  /// the one-time setup SQL (publication + anon SELECT). No-op until configured.
+  void listenForBucketInserts(void Function(String name) onInsert) {
+    stopBucketListener();
+    final client = _clientInstance;
+    if (client == null) return;
+
+    final channel = client.channel('ctrl2phone-gallery');
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'storage',
+      table: 'objects',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'bucket_id',
+        // bucket_id == bucket name for user-created Supabase buckets.
+        value: bucketName,
+      ),
+      callback: (payload) {
+        final name = payload.newRecord['name'] as String?;
+        if (name != null) onInsert(name);
+      },
+    ).subscribe();
+    _galleryChannel = channel;
+  }
+
+  void stopBucketListener() {
+    final ch = _galleryChannel;
+    if (ch != null) {
+      _clientInstance?.removeChannel(ch);
+      _galleryChannel = null;
+    }
   }
 
   SupabaseClient? get _client => _clientInstance;
   String get bucketName => _bucketName ?? 'SCREENSHOTS';
 
   /// Supabase Storage bucket'ından ekran görüntülerini listeler.
-  Future<List<Photo>> getPhotos({
+  Future<PhotoPage> getPhotos({
     int limit = 50,
     int offset = 0,
   }) async {
@@ -47,6 +86,10 @@ class SupabaseService {
             ),
           );
 
+      // Sayfalamayı HAM sunucu sayısına göre yap (filtrelemeden önce); böylece
+      // .keep / to_pc / gizli kayıtları gizlemek galeriyi erken kesmez.
+      final bool hasMore = objects.length == limit;
+
       // Filtreleme: Klasörler veya gizli sistem dosyalarını temizle (to_pc klasörü dahil)
       final files = objects
           .where((obj) =>
@@ -56,7 +99,18 @@ class SupabaseService {
               obj.name != 'to_pc')
           .toList();
 
-      return files.map((file) {
+      // Kısa ömürlü signed URL üret: bucket private olsa da görseller yüklenir
+      // ve kalıcı herkese-açık bir bağlantı bırakılmaz. İmzalama başarısızsa
+      // (bucket hâlâ public + select politikası yok) public URL'e düşeriz.
+      final photos = await Future.wait(files.map((file) async {
+        String url;
+        try {
+          url = await _client!.storage
+              .from(bucketName)
+              .createSignedUrl(file.name, 60 * 60 * 6); // 6 saat geçerli
+        } catch (_) {
+          url = _client!.storage.from(bucketName).getPublicUrl(file.name);
+        }
         return Photo(
           id: file.id ?? file.name,
           storagePath: '$bucketName/${file.name}',
@@ -65,8 +119,15 @@ class SupabaseService {
           mimeType: file.metadata?['mimetype'] as String?,
           uploadedAt: DateTime.parse(file.createdAt ?? DateTime.now().toIso8601String()),
           deviceId: 'Desktop_App',
+          url: url,
         );
-      }).toList();
+      }));
+
+      return PhotoPage(
+        photos: photos,
+        hasMore: hasMore,
+        fetchedCount: objects.length,
+      );
     } catch (e) {
       throw Exception('Ekran görüntüleri alınamadı: $e');
     }
@@ -185,91 +246,26 @@ class SupabaseService {
       throw Exception('Temizleme hatası: $e');
     }
   }
+}
 
-  // ============================================================
-  // Clipboard Sync: Metin/Link Paylaşımı (Realtime)
-  // ============================================================
+// ============================================================
+// Photo Page — bir sayfa sonucu + sayfalama bilgisi
+// ============================================================
+class PhotoPage {
+  /// Görüntülenecek (filtrelenmiş) fotoğraflar.
+  final List<Photo> photos;
 
-  // ============================================================
-  // Clipboard Sync: Metin/Link Paylaşımı (Polling)
-  // ============================================================
+  /// Sunucuda daha fazla sayfa olup olmadığı (ham sayıya göre).
+  final bool hasMore;
 
-  static Timer? _clipboardTimer;
-  static bool _isPollingClipboard = false;
-  static String? _lastProcessedClipboardId;
+  /// Sunucudan dönen HAM kayıt sayısı (offset ilerletmek için).
+  final int fetchedCount;
 
-  /// Masaüstünden gelen metinleri dinlemek için 1.5 saniyelik polling başlatır.
-  /// [onReceived] callback'i yeni metin geldiğinde çağrılır.
-  static void subscribeToClipboard(void Function(String content) onReceived) {
-    if (!isInitialized || _clientInstance == null) return;
-
-    // Önce mevcut polling'i kapat
-    unsubscribeClipboard();
-
-    _clipboardTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) async {
-      if (_isPollingClipboard) return;
-      _isPollingClipboard = true;
-
-      try {
-        final List<dynamic> response = await _clientInstance!
-            .from('clipboard_sync')
-            .select()
-            .eq('source', 'desktop')
-            .order('created_at', ascending: true)
-            .limit(1);
-
-        if (response.isNotEmpty) {
-          final row = response.first;
-          final id = row['id'] as String?;
-          if (id != _lastProcessedClipboardId) {
-            _lastProcessedClipboardId = id;
-            final content = row['content'] as String?;
-            if (content != null && content.isNotEmpty) {
-              onReceived(content);
-            }
-          }
-
-          if (id != null) {
-            await _clientInstance!
-                .from('clipboard_sync')
-                .delete()
-                .eq('id', id);
-          }
-        }
-      } catch (e) {
-        debugPrint('Clipboard polling error: $e');
-      } finally {
-        _isPollingClipboard = false;
-      }
-    });
-
-    debugPrint('Clipboard polling initialized (1.5s)');
-  }
-
-  /// Polling'i kapatır.
-  static void unsubscribeClipboard() {
-    if (_clipboardTimer != null) {
-      _clipboardTimer!.cancel();
-      _clipboardTimer = null;
-      debugPrint('Clipboard polling stopped');
-    }
-  }
-
-  /// Telefondaki metni masaüstüne göndermek için clipboard_sync tablosuna INSERT eder.
-  Future<void> sendClipboardText(String text) async {
-    if (!isInitialized) {
-      throw Exception('Supabase henüz başlatılmadı.');
-    }
-
-    try {
-      await _client!.from('clipboard_sync').insert({
-        'content': text,
-        'source': 'mobile',
-      });
-    } catch (e) {
-      throw Exception('Metin gönderilemedi: $e');
-    }
-  }
+  const PhotoPage({
+    required this.photos,
+    required this.hasMore,
+    required this.fetchedCount,
+  });
 }
 
 // ============================================================
@@ -284,6 +280,9 @@ class Photo {
   final DateTime uploadedAt;
   final String? deviceId;
 
+  /// Görüntüleme/indirme için çözülmüş (signed veya public) URL.
+  final String url;
+
   Photo({
     required this.id,
     required this.storagePath,
@@ -292,6 +291,7 @@ class Photo {
     this.mimeType,
     required this.uploadedAt,
     this.deviceId,
+    this.url = '',
   });
 
   factory Photo.fromJson(Map<String, dynamic> json) {

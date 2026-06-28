@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -28,33 +26,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _scrollController = ScrollController();
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PhotosProvider>().loadPhotos();
+      final provider = context.read<PhotosProvider>();
+      provider.loadPhotos();
+      provider.listenForNewPhotos();
       _fetchStorageUsage();
-      _startClipboardListener();
-    });
-  }
-
-  void _startClipboardListener() {
-    SupabaseService.subscribeToClipboard((content) {
-      // Panoya kopyala
-      Clipboard.setData(ClipboardData(text: content));
-      if (mounted) {
-        final preview = content.length > 80 ? '${content.substring(0, 80)}...' : content;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.content_paste, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Expanded(child: Text('Panoya kopyalandı: $preview')),
-              ],
-            ),
-            backgroundColor: Colors.indigo,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
     });
   }
 
@@ -128,7 +103,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
-    SupabaseService.unsubscribeClipboard();
     super.dispose();
   }
 
@@ -407,10 +381,9 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }
           final photo = provider.photos[index];
-          final imageUrl = SupabaseService().getPhotoUrl(photo.storagePath);
 
           return PhotoCard(
-            imageUrl: imageUrl,
+            imageUrl: photo.url,
             onTap: () => _onPhotoTap(provider.photos, index),
           );
         },
@@ -580,161 +553,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       _pickAndUploadMultipleImages();
                     },
                   ),
-                  _SourceOption(
-                    icon: Icons.link_rounded,
-                    label: 'Link/Metin',
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showClipboardSendDialog(context);
-                    },
-                  ),
                 ],
               ),
               const SizedBox(height: 16),
             ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showClipboardSendDialog(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        final theme = Theme.of(context);
-        final textController = TextEditingController();
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Bilgisayara Metin/Link Gönder',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Metin veya link anında bilgisayarınızın panosuna kopyalanacaktır.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: textController,
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    hintText: 'Metin veya link yazın...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    filled: true,
-                  ),
-                  autofocus: true,
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          Navigator.pop(context);
-                          try {
-                            final clipData = await Clipboard.getData(Clipboard.kTextPlain);
-                            final text = clipData?.text;
-                            if (text == null || text.trim().isEmpty) {
-                              messenger.showSnackBar(
-                                const SnackBar(
-                                  content: Text('Panoda metin bulunamadı'),
-                                  backgroundColor: Colors.orange,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                              return;
-                            }
-                            await SupabaseService().sendClipboardText(text.trim());
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text('Panodan gönderildi: ${text.trim().length > 50 ? '${text.trim().substring(0, 50)}...' : text.trim()}'),
-                                backgroundColor: Colors.green,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          } catch (e) {
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text('Hata: $e'),
-                                backgroundColor: Colors.red,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.content_paste),
-                        label: const Text('Panodan Gönder'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () async {
-                          final text = textController.text.trim();
-                          if (text.isEmpty) return;
-                          final messenger = ScaffoldMessenger.of(context);
-                          Navigator.pop(context);
-                          try {
-                            await SupabaseService().sendClipboardText(text);
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text('Gönderildi: ${text.length > 50 ? '${text.substring(0, 50)}...' : text}'),
-                                backgroundColor: Colors.green,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          } catch (e) {
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text('Hata: $e'),
-                                backgroundColor: Colors.red,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.send_rounded),
-                        label: const Text('Gönder'),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
           ),
         );
       },

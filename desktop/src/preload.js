@@ -10,6 +10,7 @@ const bridge = {
     focusGemini: () => electron_1.ipcRenderer.invoke('focus-gemini'),
     setSelection: (payload) => electron_1.ipcRenderer.invoke('set-selection', payload),
     cancelSelection: () => electron_1.ipcRenderer.invoke('cancel-selection'),
+    setAnnotated: (hasAnnotations) => electron_1.ipcRenderer.invoke('set-annotated', hasAnnotations),
     onStatus: (callback) => electron_1.ipcRenderer.on('status', (_, message) => callback(message)),
     onResponse: (callback) => electron_1.ipcRenderer.on('response', (_, message) => callback(message)),
     onOverlayState: (callback) => electron_1.ipcRenderer.on('overlay-state', (_, state) => callback(state)),
@@ -18,6 +19,6 @@ const bridge = {
     confirmSelectionPhone: () => electron_1.ipcRenderer.invoke('confirm-selection-phone'),
     getStorageUsage: () => electron_1.ipcRenderer.invoke('get-storage-usage'),
     purgeStorage: () => electron_1.ipcRenderer.invoke('purge-storage'),
-    sendClipboard: () => electron_1.ipcRenderer.invoke('send-clipboard'),
+    setupRls: () => electron_1.ipcRenderer.invoke('setup-rls'),
 };
 electron_1.contextBridge.exposeInMainWorld('bridge', bridge);

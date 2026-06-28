@@ -11,6 +11,7 @@
     <title>Overlay</title>
   </head>
   <body class="overlay-body">
+    <canvas id="annotationCanvas" class="annotation-canvas"></canvas>
     <div class="overlay-instructions">
       <div id="overlayText">
         <span>Ekranı sürükleyerek alan seçin.</span>
@@ -18,12 +19,25 @@
       <div class="shortcuts-hint">
         <span class="shortcut-tag"><kbd>ENTER</kbd> / <kbd>X</kbd> Gemini</span>
         <span class="shortcut-tag"><kbd>M</kbd> Telefon</span>
+        <span class="shortcut-tag"><kbd>C</kbd> OCR</span>
         <span class="shortcut-tag"><kbd>ESC</kbd> İptal</span>
       </div>
     </div>
+    <div id="annotationToolbar" class="annotation-toolbar hidden">
+      <button class="tool-btn" id="toolPen" title="Kalem">✏️</button>
+      <button class="tool-btn" id="toolBox" title="Kutu">▭</button>
+      <button class="tool-btn" id="toolRedact" title="Karart (gizle)">⬛</button>
+      <button class="tool-btn" id="toolColor" title="Renk" style="color: #ff3b30">●</button>
+      <button class="tool-btn" id="toolUndo" title="Geri al">↶</button>
+      <button class="tool-btn" id="toolClear" title="Temizle">🗑</button>
+    </div>
     <div id="selectionBox" class="selection-box hidden">
       <div id="actionBar" class="action-bar hidden">
-        <button class="action-btn gemini" id="btnGemini" title="Seçimi Gemini'a gönderir (X veya Enter)">
+        <button
+          class="action-btn gemini"
+          id="btnGemini"
+          title="Seçimi Gemini'a gönderir (X veya Enter)"
+        >
           <span class="btn-icon">✧</span> Gemini
         </button>
         <button class="action-btn phone" id="btnPhone" title="Seçimi telefona gönderir (M)">

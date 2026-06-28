@@ -136,24 +136,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       context,
                       MaterialPageRoute(builder: (_) => const QrScannerScreen()),
                     );
-                    if (result != null && result is String) {
-                      try {
-                        final Map<String, dynamic> data = json.decode(result);
-                        if (data.containsKey('url') && data.containsKey('key')) {
-                          setState(() {
-                            _urlController.text = data['url'] ?? '';
-                            _keyController.text = data['key'] ?? '';
-                            _bucketController.text = data['bucket'] ?? 'SCREENSHOTS';
-                          });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('QR kod bilgileri başarıyla yüklendi!')),
-                          );
-                        }
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('QR Kod okuma hatası: Geçersiz veri formatı.')),
-                        );
+                    if (!mounted) return;
+                    if (result == null || result is! String) return;
+
+                    final messenger = ScaffoldMessenger.of(context);
+                    try {
+                      final decoded = json.decode(result);
+                      if (decoded is! Map) {
+                        throw const FormatException('Beklenmeyen QR içeriği');
                       }
+                      final url = (decoded['url'] ?? '').toString().trim();
+                      final key = (decoded['key'] ?? '').toString().trim();
+                      final bucket = (decoded['bucket'] ?? '').toString().trim();
+
+                      if (url.isEmpty || key.isEmpty) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('QR kodunda Supabase URL veya anahtar bulunamadı.'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      // Güvenlik: yalnızca https adreslerini kabul et; kötü niyetli bir
+                      // QR uygulamayı saldırgan sunucusuna yönlendiremesin.
+                      if (!url.startsWith('https://')) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Güvenlik: QR adresi https:// ile başlamıyor, reddedildi.'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      setState(() {
+                        _urlController.text = url;
+                        _keyController.text = key;
+                        _bucketController.text = bucket.isEmpty ? 'SCREENSHOTS' : bucket;
+                      });
+                      messenger.showSnackBar(
+                        const SnackBar(content: Text('QR kod bilgileri başarıyla yüklendi!')),
+                      );
+                    } catch (e) {
+                      messenger.showSnackBar(
+                        const SnackBar(content: Text('QR Kod okuma hatası: Geçersiz veri formatı.')),
+                      );
                     }
                   },
                   icon: const Icon(Icons.qr_code_scanner_rounded),
@@ -186,7 +214,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 TextFormField(
                   controller: _keyController,
                   decoration: const InputDecoration(
-                    labelText: 'Supabase Anon/Service Key',
+                    labelText: 'Supabase Anon Key',
+                    helperText: 'Service Key DEĞİL — yalnızca Anon (public) anahtarı kullanın.',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.vpn_key),
                   ),

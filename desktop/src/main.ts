@@ -6,16 +6,26 @@ import {
   nativeImage,
   safeStorage,
   screen,
+  shell,
   Display,
 } from 'electron';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 import screenshot from 'screenshot-desktop';
 import QRCode from 'qrcode';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { autoUpdater } from 'electron-updater';
+import Tesseract from 'tesseract.js';
 import { AppSettings, Rect } from './types';
+import {
+  getVirtualBounds as computeVirtualBounds,
+  toAbsoluteRect as computeAbsoluteRect,
+  clampRectToDisplay,
+  computeCropRect,
+} from './lib/geometry';
+import { buildRlsSetupSql } from './lib/supabaseSetup';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
@@ -23,12 +33,15 @@ let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
 let geminiWindow: BrowserWindow | null = null;
 let selectionActive = false;
+let selectionStarting = false;
+let selectionHasAnnotations = false;
 let selectionRect: Rect | null = null;
 let selectionDisplay: Display | null = null;
 let capturedScreenImage: Electron.NativeImage | null = null;
 let keyListenerProcess: ChildProcess | null = null;
 let supabaseClient: SupabaseClient | null = null;
 let supabaseClientUrl = '';
+let phoneSyncInFlight = false;
 
 const settings: AppSettings = {
   prompt: 'Bu ekran görüntüsünü analiz et ve kısa bir özet ver.',
@@ -36,32 +49,37 @@ const settings: AppSettings = {
   supabaseKey: '',
   supabaseBucket: 'screenshots',
   autoCopyFromPhone: true,
+  hotkeyVk: 0xa2, // Left Ctrl
+  doublePressMs: 400,
 };
 
 const geminiUrl = 'https://gemini.google.com/app';
 
 let settingsPath: string | undefined;
 let phoneSyncInterval: NodeJS.Timeout | null = null;
-let clipboardSyncInterval: NodeJS.Timeout | null = null;
+let phoneSyncChannel: RealtimeChannel | null = null;
 
 function stopPhoneSyncPolling(): void {
   if (phoneSyncInterval) {
     clearInterval(phoneSyncInterval);
     phoneSyncInterval = null;
   }
-}
-
-function stopClipboardPolling(): void {
-  if (clipboardSyncInterval) {
-    clearInterval(clipboardSyncInterval);
-    clipboardSyncInterval = null;
+  if (phoneSyncChannel) {
+    try {
+      supabaseClient?.removeChannel(phoneSyncChannel);
+    } catch {
+      // ignore teardown errors
+    }
+    phoneSyncChannel = null;
   }
 }
 
-// ── Clipboard Sync ──────────────────────────────────────────────────────────
-
+// Lazily (re)create the Supabase client when settings are present. Returns null
+// if Supabase is not configured yet.
 function ensureSupabaseClient(): SupabaseClient | null {
-  if (!settings.supabaseUrl || !settings.supabaseKey) return null;
+  if (!settings.supabaseUrl || !settings.supabaseKey) {
+    return null;
+  }
   if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl) {
     supabaseClient = createClient(settings.supabaseUrl, settings.supabaseKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -69,115 +87,6 @@ function ensureSupabaseClient(): SupabaseClient | null {
     supabaseClientUrl = settings.supabaseUrl;
   }
   return supabaseClient;
-}
-
-async function sendClipboardToPhone(): Promise<{ ok: boolean; error?: string }> {
-  const text = clipboard.readText();
-  if (!text || !text.trim()) {
-    setStatus('Panoda kopyalanmış metin bulunamadı');
-    return { ok: false, error: 'Panoda metin yok' };
-  }
-
-  const client = ensureSupabaseClient();
-  if (!client) {
-    setStatus('Supabase ayarları eksik!');
-    return { ok: false, error: 'Supabase ayarları eksik' };
-  }
-
-  try {
-    const { error } = await client.from('clipboard_sync').insert({
-      content: text.trim(),
-      source: 'desktop',
-    });
-
-    if (error) throw new Error(error.message);
-
-    const { Notification } = require('electron');
-    if (Notification.isSupported()) {
-      const preview = text.trim().length > 60 ? text.trim().substring(0, 60) + '...' : text.trim();
-      new Notification({
-        title: 'Metin Telefona Gönderildi',
-        body: preview,
-        silent: false,
-      }).show();
-    }
-
-    setStatus('Pano metni telefona gönderildi');
-    setResponse(`Gönderilen metin: ${text.trim().substring(0, 200)}`);
-    return { ok: true };
-  } catch (err: any) {
-    console.error('Clipboard send error:', err);
-    setStatus('Metin gönderme hatası: ' + err.message);
-    return { ok: false, error: err.message };
-  }
-}
-
-let isCheckingClipboard = false;
-let lastProcessedClipboardId: string | null = null;
-
-async function checkClipboardFromMobile(): Promise<void> {
-  if (isCheckingClipboard) return;
-  const client = ensureSupabaseClient();
-  if (!client) return;
-
-  isCheckingClipboard = true;
-  try {
-    const { data, error } = await client
-      .from('clipboard_sync')
-      .select('*')
-      .eq('source', 'mobile')
-      .order('created_at', { ascending: true })
-      .limit(1);
-
-    if (error) {
-      console.warn('Clipboard poll error:', error.message);
-      return;
-    }
-
-    if (data && data.length > 0) {
-      const row = data[0];
-      if (row.id !== lastProcessedClipboardId) {
-        lastProcessedClipboardId = row.id;
-        const content = row.content;
-        if (content) {
-          clipboard.writeText(content);
-
-          const { Notification } = require('electron');
-          if (Notification.isSupported()) {
-            const preview = content.length > 60 ? content.substring(0, 60) + '...' : content;
-            new Notification({
-              title: 'Telefondan Metin Alındı',
-              body: preview,
-              silent: false,
-            }).show();
-          }
-
-          setStatus('Telefondan metin alındı');
-          setResponse(`Alınan metin: ${content.substring(0, 200)}`);
-        }
-      }
-
-      // Always try to delete the record from database to keep it clean
-      await client.from('clipboard_sync').delete().eq('id', row.id);
-    }
-  } catch (err) {
-    console.error('checkClipboardFromMobile error:', err);
-  } finally {
-    isCheckingClipboard = false;
-  }
-}
-
-function setupClipboardPolling(): void {
-  stopClipboardPolling();
-
-  const client = ensureSupabaseClient();
-  if (!client) {
-    console.log('Clipboard polling: waiting for Supabase settings');
-    return;
-  }
-
-  clipboardSyncInterval = setInterval(checkClipboardFromMobile, 1500);
-  console.log('Clipboard polling initialized (1.5s)');
 }
 
 async function checkPhoneSync(): Promise<void> {
@@ -188,6 +97,12 @@ async function checkPhoneSync(): Promise<void> {
   if (!settings.supabaseUrl || !settings.supabaseKey) {
     return;
   }
+
+  // Skip if a previous poll is still running (slow network) to avoid overlap.
+  if (phoneSyncInFlight) {
+    return;
+  }
+  phoneSyncInFlight = true;
 
   try {
     if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl) {
@@ -251,41 +166,28 @@ async function checkPhoneSync(): Promise<void> {
         fs.writeFileSync(localFilePath, buffer);
 
         downloadedLocalPaths.push(localFilePath);
+
+        // Ack-after-success: only remove the remote file once it is safely copied
+        // to the clipboard + saved locally, so a failure leaves it for retry.
+        const { error: deleteError } = await supabaseClient.storage.from(bucket).remove([filePath]);
+        if (deleteError) {
+          console.error(`Phone sync: failed to delete ${filePath}:`, deleteError);
+        }
       } else {
-        console.error('Phone sync: downloaded file is not a valid image');
-      }
-
-      // Delete from storage (cleanup)
-      const { error: deleteError } = await supabaseClient.storage.from(bucket).remove([filePath]);
-
-      if (deleteError) {
-        console.error(`Phone sync: failed to delete ${filePath}:`, deleteError);
+        console.error('Phone sync: downloaded file is not a valid image (kept for retry)');
       }
     }
 
     if (downloadedLocalPaths.length > 0) {
-      const possibleDropperPaths = [
-        path.join(process.resourcesPath, 'src', 'photo_dropper.exe'),
-        path.join(process.resourcesPath, 'photo_dropper.exe'),
-        path.join(__dirname, 'photo_dropper.exe'),
-        path.join(__dirname, '..', 'src', 'photo_dropper.exe'),
-        path.join(app.getAppPath(), 'src', 'photo_dropper.exe'),
-      ];
-      let dropperPath = '';
-      for (const p of possibleDropperPaths) {
-        if (fs.existsSync(p)) {
-          dropperPath = p;
-          break;
-        }
-      }
-
+      // Launch Spotlight-style floating photo dropper C# executable with all paths
+      const dropperPath = getPhotoDropperPath();
       if (dropperPath) {
         spawn(dropperPath, downloadedLocalPaths, {
           detached: true,
-          stdio: 'ignore'
+          stdio: 'ignore',
         }).unref();
       } else {
-        console.error('[Phone Sync] photo_dropper.exe not found at paths:', possibleDropperPaths.join(', '));
+        console.error('[Phone Sync] photo_dropper.exe not found in any known location');
       }
 
       const { Notification } = require('electron');
@@ -293,17 +195,28 @@ async function checkPhoneSync(): Promise<void> {
         const count = downloadedLocalPaths.length;
         const notification = new Notification({
           title: count > 1 ? 'Telefondan Görseller Alındı' : 'Telefondan Görsel Alındı',
-          body: count > 1 ? `${count} adet fotoğraf paneli açıldı! Sürükle-bırak kullanabilirsiniz.` : 'Fotoğraf paneli açıldı! Sürükle-bırak kullanabilirsiniz.',
+          body:
+            count > 1
+              ? `${count} adet fotoğraf paneli açıldı! Sürükle-bırak kullanabilirsiniz.`
+              : 'Fotoğraf paneli açıldı! Sürükle-bırak kullanabilirsiniz.',
           silent: false,
         });
         notification.show();
       }
 
-      setStatus(downloadedLocalPaths.length > 1 ? `${downloadedLocalPaths.length} görsel telefondan alındı` : 'Görsel telefondan alındı');
-      setResponse(`${downloadedLocalPaths.length} adet görsel telefondan alındı ve sürükle-bırak paneli açıldı.`);
+      setStatus(
+        downloadedLocalPaths.length > 1
+          ? `${downloadedLocalPaths.length} görsel telefondan alındı`
+          : 'Görsel telefondan alındı'
+      );
+      setResponse(
+        `${downloadedLocalPaths.length} adet görsel telefondan alındı ve sürükle-bırak paneli açıldı.`
+      );
     }
   } catch (err: any) {
     console.error('Error in checkPhoneSync:', err);
+  } finally {
+    phoneSyncInFlight = false;
   }
 }
 
@@ -315,13 +228,43 @@ function setupPhoneSyncPolling(): void {
     return;
   }
 
-  if (!settings.supabaseUrl || !settings.supabaseKey) {
+  const client = ensureSupabaseClient();
+  if (!client) {
     console.log('Phone sync: waiting for Supabase settings');
     return;
   }
 
-  console.log('Phone sync: polling initialized');
-  phoneSyncInterval = setInterval(checkPhoneSync, 4000);
+  const bucket = settings.supabaseBucket || 'screenshots';
+
+  // Realtime push: react instantly when the phone uploads into to_pc/. Requires
+  // the one-time setup SQL (storage.objects in the realtime publication + anon
+  // SELECT policy). If unavailable, the slow fallback poll below still works.
+  phoneSyncChannel = client
+    .channel('ctrl2phone-to-pc')
+    .on(
+      'postgres_changes',
+      // bucket_id == bucket name for user-created Supabase buckets.
+      { event: 'INSERT', schema: 'storage', table: 'objects', filter: `bucket_id=eq.${bucket}` },
+      (payload: { new?: { name?: string } }) => {
+        const name = payload?.new?.name ?? '';
+        if (name.startsWith('to_pc/')) {
+          checkPhoneSync();
+        }
+      }
+    )
+    .subscribe((status: string) => {
+      if (status === 'SUBSCRIBED') {
+        // Catch anything that arrived while we were disconnected.
+        checkPhoneSync();
+      }
+    });
+
+  // Safety-net poll, far slower than the old 4s, so sync still works even when
+  // Realtime is unavailable or the publication was not enabled.
+  phoneSyncInterval = setInterval(checkPhoneSync, 15000);
+
+  console.log('Phone sync: realtime + 15s fallback initialized');
+  checkPhoneSync();
 }
 
 function loadSettingsFromFile(): void {
@@ -374,32 +317,6 @@ function saveSettingsToFile(): void {
   }
 }
 
-function handleKeyAction(key: string): boolean {
-  const normalizedKey = String(key || '').toUpperCase();
-  if (normalizedKey === 'Q') {
-    app.quit();
-    return true;
-  }
-  return false;
-}
-
-function attachKeyHandlers(windowInstance: BrowserWindow): void {
-  if (!windowInstance || windowInstance.isDestroyed()) {
-    return;
-  }
-
-  windowInstance.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown') {
-      return;
-    }
-
-    const handled = handleKeyAction(input.key);
-    if (handled) {
-      event.preventDefault();
-    }
-  });
-}
-
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1120,
@@ -422,32 +339,10 @@ function createMainWindow(): void {
   });
 
   mainWindow.loadFile(path.join(app.getAppPath(), 'index.html'));
-  attachKeyHandlers(mainWindow);
 }
 
 function getVirtualBounds(): Rect {
-  const displays = screen.getAllDisplays();
-  const bounds = displays.reduce(
-    (acc, display) => ({
-      x: Math.min(acc.x, display.bounds.x),
-      y: Math.min(acc.y, display.bounds.y),
-      right: Math.max(acc.right, display.bounds.x + display.bounds.width),
-      bottom: Math.max(acc.bottom, display.bounds.y + display.bounds.height),
-    }),
-    {
-      x: displays[0].bounds.x,
-      y: displays[0].bounds.y,
-      right: displays[0].bounds.x + displays[0].bounds.width,
-      bottom: displays[0].bounds.y + displays[0].bounds.height,
-    }
-  );
-
-  return {
-    x: bounds.x,
-    y: bounds.y,
-    width: bounds.right - bounds.x,
-    height: bounds.bottom - bounds.y,
-  };
+  return computeVirtualBounds(screen.getAllDisplays());
 }
 
 function createOverlayWindow(): void {
@@ -479,7 +374,6 @@ function createOverlayWindow(): void {
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   overlayWindow.loadFile(path.join(app.getAppPath(), 'src', 'overlay.html'));
-  attachKeyHandlers(overlayWindow);
 }
 
 function createGeminiWindow(): BrowserWindow {
@@ -511,12 +405,8 @@ function createGeminiWindow(): BrowserWindow {
     geminiWindow = null;
   });
 
-  attachKeyHandlers(geminiWindow);
-
   return geminiWindow;
 }
-
-
 
 async function openGeminiWindow(): Promise<BrowserWindow> {
   const windowInstance = createGeminiWindow();
@@ -546,7 +436,10 @@ async function ensureGeminiWindowLoaded(): Promise<BrowserWindow> {
   return windowInstance;
 }
 
-async function focusGeminiComposer(windowInstance: BrowserWindow, promptText: string): Promise<boolean> {
+async function focusGeminiComposer(
+  windowInstance: BrowserWindow,
+  promptText: string
+): Promise<boolean> {
   const safePrompt = JSON.stringify(promptText);
   const focused = await windowInstance.webContents.executeJavaScript(`
     (() => {
@@ -635,6 +528,7 @@ function setSelectionInstruction(message: string): void {
 
 function resetSelectionSession(): void {
   selectionActive = false;
+  selectionHasAnnotations = false;
   selectionRect = null;
   selectionDisplay = null;
   capturedScreenImage = null;
@@ -644,6 +538,12 @@ function resetSelectionSession(): void {
 }
 
 async function startSelectionSession(): Promise<void> {
+  // Guard against re-entry: a second DOUBLE_CTRL can arrive before the async
+  // screenshot resolves and sets selectionActive, which would start two sessions.
+  if (selectionStarting || selectionActive) {
+    return;
+  }
+  selectionStarting = true;
   try {
     const cursorPoint = screen.getCursorScreenPoint();
     const activeDisplay = screen.getDisplayNearestPoint(cursorPoint);
@@ -664,37 +564,20 @@ async function startSelectionSession(): Promise<void> {
     selectionRect = null;
 
     showSelectionOverlay(dataUrl, activeDisplay.bounds);
-    setSelectionInstruction('Alanı fareyle seç, sonra X veya Enter ile gönder, Esc ile iptal et.');
+    setSelectionInstruction(
+      'Alanı seç → X/Enter: Gemini · M: Telefon · C: Metin (OCR) · Esc: iptal'
+    );
     setStatus('Seçim modu açık. Alanı fareyle çiz.');
   } catch (error: any) {
     console.error('Ekran yakalama hatası:', error);
     setStatus('Ekran yakalama başlatılamadı: ' + error.message);
+  } finally {
+    selectionStarting = false;
   }
 }
 
 function toAbsoluteRect(rect: Rect): Rect {
-  const bounds = getVirtualBounds();
-
-  return {
-    x: rect.x + bounds.x,
-    y: rect.y + bounds.y,
-    width: rect.width,
-    height: rect.height,
-  };
-}
-
-function clampRectToDisplay(rect: Rect, displayBounds: Rect): Rect {
-  const x = Math.max(rect.x, displayBounds.x);
-  const y = Math.max(rect.y, displayBounds.y);
-  const right = Math.min(rect.x + rect.width, displayBounds.x + displayBounds.width);
-  const bottom = Math.min(rect.y + rect.height, displayBounds.y + displayBounds.height);
-
-  return {
-    x,
-    y,
-    width: Math.max(0, right - x),
-    height: Math.max(0, bottom - y),
-  };
+  return computeAbsoluteRect(rect, getVirtualBounds());
 }
 
 function cropImageToSelection(
@@ -702,31 +585,63 @@ function cropImageToSelection(
   rect: Rect,
   display: Display
 ): Electron.NativeImage {
-  const scaleFactor = display.scaleFactor || 1;
-  const relative = {
-    x: Math.round((rect.x - display.bounds.x) * scaleFactor),
-    y: Math.round((rect.y - display.bounds.y) * scaleFactor),
-    width: Math.round(rect.width * scaleFactor),
-    height: Math.round(rect.height * scaleFactor),
-  };
-
+  const relative = computeCropRect(rect, display.bounds, image.getSize(), display.scaleFactor);
   return image.crop(relative);
 }
 
-function getKeyListenerPath(): string {
-  const possiblePaths = [
-    path.join(process.resourcesPath, 'src', 'key_listener.exe'),
-    path.join(process.resourcesPath, 'key_listener.exe'),
-    path.join(__dirname, 'key_listener.exe'),
-    path.join(__dirname, '..', 'src', 'key_listener.exe'),
-    path.join(app.getAppPath(), 'src', 'key_listener.exe'),
+// If the user drew annotations on the overlay, ask the renderer to composite the
+// selection region + annotations into a PNG. Returns null when there are no
+// annotations or compositing fails, so callers fall back to the plain crop.
+async function getAnnotatedComposite(): Promise<Electron.NativeImage | null> {
+  if (!selectionHasAnnotations || !overlayWindow || overlayWindow.isDestroyed()) {
+    return null;
+  }
+  try {
+    const dataUrl = await overlayWindow.webContents.executeJavaScript(
+      'window.__ctrl2phoneCompose ? window.__ctrl2phoneCompose() : null'
+    );
+    if (dataUrl && typeof dataUrl === 'string') {
+      const img = nativeImage.createFromDataURL(dataUrl);
+      if (!img.isEmpty()) {
+        return img;
+      }
+    }
+  } catch (e) {
+    console.error('Annotation composite failed; using plain crop:', e);
+  }
+  return null;
+}
+
+// Candidate locations for a bundled native helper exe. process.resourcesPath
+// (where electron-builder's extraResources land) must be checked first so the
+// packaged build finds the exe; the later entries cover dev / npm start.
+function helperExeCandidates(name: string): string[] {
+  return [
+    path.join(process.resourcesPath, 'src', name),
+    path.join(process.resourcesPath, name),
+    path.join(__dirname, name),
+    path.join(__dirname, '..', 'src', name),
+    path.join(app.getAppPath(), 'src', name),
   ];
+}
+
+function getKeyListenerPath(): string {
+  const possiblePaths = helperExeCandidates('key_listener.exe');
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) return p;
   }
   throw new Error(
     `key_listener.exe not found at paths: ${possiblePaths.join(', ')}. Run: csc /target:winexe /out:key_listener.exe key_listener.cs`
   );
+}
+
+// Optional helper — returns null (rather than throwing) when not present, since
+// the phone-sync panel is a nice-to-have.
+function getPhotoDropperPath(): string | null {
+  for (const p of helperExeCandidates('photo_dropper.exe')) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
 }
 
 function startKeyListener(): void {
@@ -749,15 +664,27 @@ function startKeyListener(): void {
     setStatus('Klavye dinleyici başlatılamadı');
   });
 
+  // Push the current hotkey config to the freshly-spawned listener.
+  sendKeyListenerConfig();
+
   setStatus('Çift Ctrl ile seçim modu hazır');
+}
+
+// Tell the C# listener which key to watch for and the double-press window.
+function sendKeyListenerConfig(): void {
+  if (keyListenerProcess && !keyListenerProcess.killed) {
+    const vk = settings.hotkeyVk || 0xa2;
+    const ms = settings.doublePressMs || 400;
+    keyListenerProcess.stdin?.write(`CONFIG:${vk}:${ms}\n`);
+  }
 }
 
 function stopKeyListener(): void {
   if (keyListenerProcess) {
     try {
       keyListenerProcess.kill();
-    } catch (e) {
-      // ignore
+    } catch {
+      // ignore — process may already be gone
     }
     keyListenerProcess = null;
   }
@@ -784,14 +711,28 @@ function handleGlobalKeyEvent(event: string): void {
       }
       captureAndSendToSupabase();
     }
-  } else if (event === 'CTRL_SHIFT_V') {
-    sendClipboardToPhone();
+  } else if (event === 'KEY_C') {
+    if (selectionActive) {
+      if (!selectionRect) {
+        setStatus('Önce fareyle bir alan seç.');
+        return;
+      }
+      captureAndExtractText();
+    }
   } else if (event === 'KEY_ESCAPE') {
     if (selectionActive) {
       hideSelectionOverlay();
       resetSelectionSession();
       setStatus('Seçim iptal edildi');
     }
+  } else if (event === 'KEY_Q') {
+    // Q quits the app — only forwarded by the key listener while selection is
+    // active, so it never fires while the user is typing in a window.
+    if (selectionActive) {
+      hideSelectionOverlay();
+      resetSelectionSession();
+    }
+    app.quit();
   }
 }
 
@@ -815,7 +756,9 @@ async function captureAndSend(): Promise<void> {
       return;
     }
 
-    const croppedImage = cropImageToSelection(capturedScreenImage, clampedRect, display);
+    const croppedImage =
+      (await getAnnotatedComposite()) ??
+      cropImageToSelection(capturedScreenImage, clampedRect, display);
 
     // Reset selection session immediately so the user gets control back
     hideSelectionOverlay();
@@ -868,7 +811,9 @@ async function captureAndSendToSupabase(): Promise<void> {
       return;
     }
 
-    const croppedImage = cropImageToSelection(capturedScreenImage, clampedRect, display);
+    const croppedImage =
+      (await getAnnotatedComposite()) ??
+      cropImageToSelection(capturedScreenImage, clampedRect, display);
     const pngBuffer = croppedImage.toPNG();
 
     // Reset selection session immediately so the user gets control back
@@ -877,7 +822,9 @@ async function captureAndSendToSupabase(): Promise<void> {
     setStatus("Görsel Supabase'e yükleniyor...");
 
     const bucket = settings.supabaseBucket || 'screenshots';
-    const fileName = `screenshot_${Date.now()}.png`;
+    // Unguessable name: a timestamp-based name would let anyone who knows the
+    // bucket enumerate every screenshot by guessing recent timestamps.
+    const fileName = `screenshot_${randomUUID()}.png`;
 
     if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl) {
       supabaseClient = createClient(settings.supabaseUrl, settings.supabaseKey, {
@@ -895,14 +842,82 @@ async function captureAndSendToSupabase(): Promise<void> {
       throw new Error(`Supabase upload hatası: ${error.message}`);
     }
 
-    const { data: publicUrlData } = supabaseClient.storage.from(bucket).getPublicUrl(fileName);
+    // Signed URL (not getPublicUrl) so the link keeps working when the bucket is
+    // private — and expires, so it isn't a permanent public handle to the image.
+    let shareUrl = '';
+    try {
+      const { data: signed } = await supabaseClient.storage
+        .from(bucket)
+        .createSignedUrl(fileName, 60 * 60 * 24 * 7); // 7 gün geçerli
+      shareUrl = signed?.signedUrl ?? '';
+    } catch {
+      // Signed URL üretilemezse (örn. izin yoksa) link göstermeden geç
+    }
 
-    setResponse(`Supabase'e başarıyla yüklendi!\nGörsel Adresi:\n${publicUrlData.publicUrl}`);
+    setResponse(
+      shareUrl
+        ? `Supabase'e başarıyla yüklendi!\nGörsel Adresi (7 gün geçerli):\n${shareUrl}`
+        : "Supabase'e başarıyla yüklendi! Telefon uygulamasından görüntüleyebilirsin."
+    );
     setStatus('Seçilen görsel telefona gönderildi (Supabase)');
   } catch (error: any) {
     console.error('Supabase upload error:', error);
     setResponse(`Hata: ${error.message}`);
     setStatus('Supabase yükleme hatası');
+    hideSelectionOverlay();
+    resetSelectionSession();
+  }
+}
+
+async function captureAndExtractText(): Promise<void> {
+  try {
+    if (!selectionRect || !selectionDisplay || !capturedScreenImage) {
+      setStatus('Seçim alanı veya yakalanan ekran resmi bulunamadı');
+      hideSelectionOverlay();
+      resetSelectionSession();
+      return;
+    }
+
+    const absoluteRect = toAbsoluteRect(selectionRect);
+    const display = selectionDisplay;
+    const clampedRect = clampRectToDisplay(absoluteRect, display.bounds);
+
+    if (clampedRect.width <= 0 || clampedRect.height <= 0) {
+      setStatus('Geçersiz seçim alanı');
+      hideSelectionOverlay();
+      resetSelectionSession();
+      return;
+    }
+
+    const croppedImage =
+      (await getAnnotatedComposite()) ??
+      cropImageToSelection(capturedScreenImage, clampedRect, display);
+    const pngBuffer = croppedImage.toPNG();
+
+    // Give control back immediately; OCR can take a couple of seconds.
+    hideSelectionOverlay();
+    resetSelectionSession();
+    setStatus('Metin tanınıyor (OCR)...');
+
+    const {
+      data: { text },
+    } = await Tesseract.recognize(pngBuffer, 'eng+tur');
+    const cleaned = text.trim();
+
+    if (cleaned) {
+      clipboard.writeText(cleaned);
+      setResponse(`Tanınan metin panoya kopyalandı:\n\n${cleaned}`);
+      setStatus('Metin panoya kopyalandı (OCR)');
+    } else {
+      setResponse('Seçili alanda metin bulunamadı.');
+      setStatus('Metin bulunamadı');
+    }
+  } catch (error: any) {
+    console.error('OCR error:', error);
+    setResponse(
+      `OCR hatası: ${error.message}\n(İlk kullanımda dil modeli indirilir; internet bağlantısı gerekir.)`
+    );
+    setStatus('OCR hatası');
     hideSelectionOverlay();
     resetSelectionSession();
   }
@@ -914,6 +929,8 @@ ipcMain.handle('app-ready', () => ({
   supabaseKey: settings.supabaseKey,
   supabaseBucket: settings.supabaseBucket,
   autoCopyFromPhone: settings.autoCopyFromPhone,
+  hotkeyVk: settings.hotkeyVk,
+  doublePressMs: settings.doublePressMs,
   selectionActive,
 }));
 
@@ -925,12 +942,26 @@ ipcMain.handle('generate-qr', async () => {
     const data = JSON.stringify({
       url: settings.supabaseUrl,
       key: settings.supabaseKey,
-      bucket: settings.supabaseBucket || 'SCREENSHOTS',
+      bucket: settings.supabaseBucket || 'screenshots',
     });
     const dataUrl = await QRCode.toDataURL(data);
     return { ok: true, dataUrl };
   } catch (error: any) {
     console.error('QR Kod oluşturma hatası:', error);
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('setup-rls', async () => {
+  try {
+    const bucket = settings.supabaseBucket || 'screenshots';
+    const sql = buildRlsSetupSql(bucket);
+    clipboard.writeText(sql);
+    // Deep-link to the user's last-used project SQL editor (the '_' placeholder).
+    await shell.openExternal('https://supabase.com/dashboard/project/_/sql/new');
+    return { ok: true, sql };
+  } catch (error: any) {
+    console.error('RLS kurulum hatası:', error);
     return { ok: false, error: error.message };
   }
 });
@@ -942,18 +973,18 @@ ipcMain.handle('save-settings', (_, nextSettings: Partial<AppSettings>) => {
     supabaseKey: nextSettings.supabaseKey ?? settings.supabaseKey,
     supabaseBucket: nextSettings.supabaseBucket ?? settings.supabaseBucket,
     autoCopyFromPhone: nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone,
+    hotkeyVk: nextSettings.hotkeyVk ?? settings.hotkeyVk,
+    doublePressMs: nextSettings.doublePressMs ?? settings.doublePressMs,
   });
 
   supabaseClient = null;
   supabaseClientUrl = '';
 
+  sendKeyListenerConfig();
   saveSettingsToFile();
   setupPhoneSyncPolling();
-  setupClipboardPolling();
   return { ok: true };
 });
-
-
 
 ipcMain.handle('open-gemini', async () => {
   const windowInstance = await openGeminiWindow();
@@ -1009,6 +1040,11 @@ ipcMain.handle('cancel-selection', () => {
   return { ok: true };
 });
 
+ipcMain.handle('set-annotated', (_, hasAnnotations: boolean) => {
+  selectionHasAnnotations = Boolean(hasAnnotations);
+  return { ok: true };
+});
+
 ipcMain.handle('confirm-selection-gemini', async () => {
   if (selectionActive && selectionRect) {
     await captureAndSend();
@@ -1026,18 +1062,19 @@ ipcMain.handle('confirm-selection-phone', async () => {
 });
 
 ipcMain.handle('get-storage-usage', async () => {
+  ensureSupabaseClient();
   if (!supabaseClient || !settings.supabaseBucket) {
     return { ok: false, error: 'Supabase client not initialized' };
   }
   try {
     const bucket = settings.supabaseBucket;
-    
+
     // List all files in the root of the bucket
     const { data: files, error } = await supabaseClient.storage.from(bucket).list('', {
       limit: 1000,
     });
     if (error) throw error;
-    
+
     let totalBytes = 0;
     if (files) {
       for (const f of files) {
@@ -1046,28 +1083,32 @@ ipcMain.handle('get-storage-usage', async () => {
         }
       }
     }
-    
+
     // List to_pc files too
     let toPcFiles: any[] = [];
     try {
-      const { data: toPc, error: toPcError } = await supabaseClient.storage.from(bucket).list('to_pc', {
-        limit: 1000,
-      });
+      const { data: toPc, error: toPcError } = await supabaseClient.storage
+        .from(bucket)
+        .list('to_pc', {
+          limit: 1000,
+        });
       if (!toPcError && toPc) toPcFiles = toPc;
-    } catch (_) {}
+    } catch {
+      // to_pc klasörü yoksa yoksay
+    }
 
     for (const f of toPcFiles) {
       if (f.metadata && f.metadata.size) {
         totalBytes += f.metadata.size;
       }
     }
-    
+
     const limitBytes = 1024 * 1024 * 1024; // 1 GB
     return {
       ok: true,
       usedBytes: totalBytes,
       limitBytes: limitBytes,
-      usedPercentage: (totalBytes / limitBytes) * 100
+      usedPercentage: (totalBytes / limitBytes) * 100,
     };
   } catch (err: any) {
     return { ok: false, error: err.message };
@@ -1075,16 +1116,19 @@ ipcMain.handle('get-storage-usage', async () => {
 });
 
 ipcMain.handle('purge-storage', async () => {
+  ensureSupabaseClient();
   if (!supabaseClient || !settings.supabaseBucket) {
     return { ok: false, error: 'Supabase client not initialized' };
   }
   try {
     const bucket = settings.supabaseBucket;
-    
+
     // 1. List files in root
-    const { data: rootFiles, error: rootError } = await supabaseClient.storage.from(bucket).list('', {
-      limit: 1000,
-    });
+    const { data: rootFiles, error: rootError } = await supabaseClient.storage
+      .from(bucket)
+      .list('', {
+        limit: 1000,
+      });
     if (rootError) throw rootError;
 
     const filesToDelete: string[] = [];
@@ -1099,11 +1143,15 @@ ipcMain.handle('purge-storage', async () => {
     // 2. List files in to_pc
     let toPcFiles: any[] = [];
     try {
-      const { data: toPc, error: toPcError } = await supabaseClient.storage.from(bucket).list('to_pc', {
-        limit: 1000,
-      });
+      const { data: toPc, error: toPcError } = await supabaseClient.storage
+        .from(bucket)
+        .list('to_pc', {
+          limit: 1000,
+        });
       if (!toPcError && toPc) toPcFiles = toPc;
-    } catch (_) {}
+    } catch {
+      // to_pc klasörü yoksa yoksay
+    }
 
     for (const f of toPcFiles) {
       if (f.name !== '.keep' && !f.name.startsWith('.')) {
@@ -1112,7 +1160,9 @@ ipcMain.handle('purge-storage', async () => {
     }
 
     if (filesToDelete.length > 0) {
-      const { error: removeError } = await supabaseClient.storage.from(bucket).remove(filesToDelete);
+      const { error: removeError } = await supabaseClient.storage
+        .from(bucket)
+        .remove(filesToDelete);
       if (removeError) throw removeError;
     }
 
@@ -1120,10 +1170,6 @@ ipcMain.handle('purge-storage', async () => {
   } catch (err: any) {
     return { ok: false, error: err.message };
   }
-});
-
-ipcMain.handle('send-clipboard', async () => {
-  return sendClipboardToPhone();
 });
 
 // ── Auto-updater ────────────────────────────────────────────────────────────
@@ -1143,6 +1189,11 @@ autoUpdater.on('update-downloaded', () => {
   console.log('Update downloaded; will install on quit');
 });
 
+// Last-resort safety net so a stray rejection never tears the app down silently.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -1160,15 +1211,22 @@ if (!gotTheLock) {
     loadSettingsFromFile();
     createMainWindow();
     createOverlayWindow();
-    startKeyListener();
+    // Don't let a missing/unbuilt key_listener.exe crash the whole startup chain.
+    try {
+      startKeyListener();
+    } catch (err) {
+      console.error('Klavye dinleyici başlatılamadı:', err);
+      setStatus('Klavye dinleyici bulunamadı (key_listener.exe derlenmemiş olabilir).');
+    }
     setupPhoneSyncPolling();
-    setupClipboardPolling();
 
     setTimeout(() => {
-      ensureGeminiWindowLoaded();
+      ensureGeminiWindowLoaded().catch((e) => console.error('Gemini ön-yükleme hatası:', e));
     }, 5000);
 
-    autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater
+      .checkForUpdatesAndNotify()
+      .catch((e) => console.error('Güncelleme kontrolü başarısız:', e));
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -1186,7 +1244,6 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   stopKeyListener();
   stopPhoneSyncPolling();
-  stopClipboardPolling();
 });
 
 app.on('window-all-closed', () => {

@@ -2,9 +2,9 @@
 
 # ⌨️ Ctrl2Phone
 
-**Double-tap Ctrl → Select area → Send to Gemini or your Phone | + Universal Clipboard Syncing**
+**Double-tap Ctrl → Select area → Send to Gemini or your Phone**
 
-*Çift Ctrl → Alan seç → Gemini'a veya Telefonuna gönder | + Evrensel Pano Senkronizasyonu*
+*Çift Ctrl → Alan seç → Gemini'a veya Telefonuna gönder*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-35-47848F?logo=electron)](https://www.electronjs.org/)
@@ -29,7 +29,6 @@ Ctrl2Phone is an open-source desktop + mobile system that lets you:
 2. **Draw a selection** with your mouse
 3. **Press X** → Paste it directly into Gemini Web
 4. **Press M** → Send it to your phone's gallery via Supabase
-5. **Press Ctrl + Shift + V** (Desktop) or tap **FAB** (Mobile) → Sync your clipboard/links instantly across device panos!
 
 No cloud accounts needed on our side — **you bring your own Supabase** (free tier works perfectly).
 
@@ -41,7 +40,6 @@ No cloud accounts needed on our side — **you bring your own Supabase** (free t
 | ✂️ **Pixel-Perfect Selection** | Draw any rectangle, multi-monitor aware |
 | 🤖 **Gemini Integration** | Press X to paste selection directly into Gemini Web |
 | 📱 **Phone Sync** | Press M to upload to Supabase → open mobile app → image in your gallery |
-| 📋 **Universal Clipboard** | Sync text and links instantly. Robust 1.5s polling loop with duplicate-protection algorithms |
 | 📷 **QR Setup** | Scan QR code from desktop app to configure mobile app instantly |
 | 🔒 **Privacy First** | Your keys, your storage. No third-party servers. Fully open source |
 | 🎯 **Smart Key Blocking** | Hotkeys only intercept when selection overlay is active (won't mute YouTube!) |
@@ -51,18 +49,13 @@ No cloud accounts needed on our side — **you bring your own Supabase** (free t
 
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   Desktop App    │     │     Supabase     │     │   Mobile App     │
-│   (Electron)     │────▶│ • Storage Bucket │◀────│   (Flutter)      │
-│                  │     │ • Database Table │     │                  │
-│ • C# Key Hook    │     │   (clipboard_sync│     │ • QR Scanner     │
-│ • Screen Capture │     └──────────────────┘     │ • Gallery Save   │
-│ • Clipboard Poll │              ▲               │ • Clipboard Poll │
-└──────────────────┘              │               └──────────────────┘
-                                  ▼
-                        ┌──────────────────┐
-                        │  Window DPAPI    │
-                        │  (SafeStorage)   │
-                        └──────────────────┘
+│   Desktop App    │     │     Supabase      │     │   Mobile App     │
+│   (Electron)     │────▶│   Storage Bucket  │◀────│   (Flutter)      │
+│                  │     │                   │     │                  │
+│ • C# Key Hook   │     │ • PNG files       │     │ • QR Scanner     │
+│ • Screen Capture │     │ • Public URLs     │     │ • Gallery Save   │
+│ • Gemini Paste   │     │ • Free tier OK    │     │ • Auto Download  │
+└──────────────────┘     └──────────────────┘     └──────────────────┘
 ```
 
 ### 📥 Downloads
@@ -104,14 +97,16 @@ flutter run
 
 ### ⌨️ Keyboard Shortcuts
 
-| Shortcut | Action | Location |
-|---|---|---|
-| `Ctrl` `Ctrl` (double tap) | Open selection overlay | Everywhere |
-| `Ctrl` + `Shift` + `V` | Sync desktop clipboard to mobile | Everywhere |
-| `X` or `Enter` | Send selection to Gemini Web | Selection Overlay |
-| `M` | Upload selection to Supabase (→ Phone) | Selection Overlay |
-| `Esc` | Cancel selection | Selection Overlay |
-| `Q` | Quit application | Selection Overlay |
+| Shortcut | Action |
+|---|---|
+| `Ctrl` `Ctrl` (double tap) | Open selection overlay |
+| `X` or `Enter` | Send selection to Gemini Web |
+| `M` | Upload selection to Supabase (→ Phone) |
+| `C` | Extract text from selection (OCR → clipboard) |
+| `Esc` | Cancel selection |
+| `Q` | Quit application |
+
+> The **trigger key** (Left Ctrl by default — choose Left/Right Ctrl, Alt or Shift) and the **double-tap window** (ms) are configurable in the desktop app settings.
 
 ### 📋 Prerequisites
 
@@ -122,7 +117,10 @@ flutter run
 
 ### 🔨 Building the C# Key Listener
 
-The global hotkey listener is a small C# Windows app that must be compiled before running:
+There are **two** small C# Windows helpers that must be compiled before running:
+
+- `key_listener.exe` — the global double-Ctrl hotkey listener.
+- `photo_dropper.exe` — the floating drag-and-drop panel shown when a photo arrives from your phone. **If you skip this, phone→PC sync still copies the image to your clipboard, but the panel won't appear.**
 
 ```powershell
 # From the desktop/src directory
@@ -130,40 +128,54 @@ cd ctrl2phone/desktop/src
 
 # Using csc (C# compiler) — included with Windows SDK or Visual Studio
 csc /target:winexe /out:key_listener.exe key_listener.cs
-
-# Or using dotnet CLI (if you have .NET SDK installed)
-dotnet build -c Release -o . key_listener.cs
+csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
 ```
 
-> ⚠️ **Do not commit `key_listener.exe` to Git.** It is already listed in `.gitignore`.
+> ⚠️ **Do not commit `key_listener.exe` / `photo_dropper.exe` to Git.** They are already listed in `.gitignore`.
+
+### 🔒 Security Notes
+
+- **Use your Supabase Anon Key**, never the Service Key. The Service Key bypasses Row Level Security (RLS) and must never be put into a client app or a QR code.
+- **Run the one-time security setup.** In the desktop app click the **🔒 Secure Setup (RLS)** button (labeled *"Güvenli Kurulum…"*): it copies a SQL snippet and opens your Supabase SQL Editor — paste it and press **Run**. It makes your bucket **private** and scopes the anon key to *only* that bucket.
+- The app reads images through **short-lived signed URLs** (not permanent public links), so the gallery keeps working after the bucket is private, and there is no forever-public handle to your screenshots. Filenames are random UUIDs, so they can't be enumerated.
+- ⚠️ **Until you run the setup SQL the bucket is PUBLIC** — anyone who learns your project URL + bucket name can read every screenshot. Treat the pairing QR code (which carries your anon key) like a password.
+
+<details><summary>The SQL the button runs (for bucket <code>screenshots</code>)</summary>
+
+```sql
+update storage.buckets set public = false where name = 'screenshots';
+
+create policy "ctrl2phone_select_screenshots" on storage.objects
+  for select to anon, authenticated using (bucket_id = 'screenshots');
+create policy "ctrl2phone_insert_screenshots" on storage.objects
+  for insert to anon, authenticated with check (bucket_id = 'screenshots');
+create policy "ctrl2phone_update_screenshots" on storage.objects
+  for update to anon, authenticated using (bucket_id = 'screenshots') with check (bucket_id = 'screenshots');
+create policy "ctrl2phone_delete_screenshots" on storage.objects
+  for delete to anon, authenticated using (bucket_id = 'screenshots');
+
+-- Realtime push (instant phone↔PC sync instead of polling) — best-effort.
+-- 'storage' is a private schema, so anon needs a table GRANT (not just RLS) to
+-- receive change events. Both steps are non-fatal: if your role lacks permission
+-- they're skipped (NOTICE) without rolling back the policies above — enable
+-- storage.objects under Database → Publications in the dashboard instead.
+do $$ begin
+  grant select on storage.objects to anon, authenticated;
+exception when others then raise notice 'grant skipped: %', sqlerrm; end $$;
+do $$ begin
+  alter publication supabase_realtime add table storage.objects;
+exception when others then raise notice 'publication skipped: %', sqlerrm; end $$;
+```
+The in-app button generates this for *your* actual bucket name. See [Supabase Storage access control](https://supabase.com/docs/guides/storage/security/access-control).
+</details>
 
 ### 🔧 Supabase Setup
 
 1. Create a new project at [supabase.com](https://supabase.com)
 2. Go to **Storage** → Create a new bucket (e.g., `screenshots`)
 3. Set the bucket to **Public**
-4. Go to **SQL Editor** and run the following script to create the Clipboard sync table:
-   ```sql
-   CREATE TABLE clipboard_sync (
-     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-     content TEXT NOT NULL,
-     source TEXT NOT NULL CHECK (source IN ('desktop', 'mobile')),
-     created_at TIMESTAMPTZ DEFAULT NOW()
-   );
-
-   -- Enable Row Level Security
-   ALTER TABLE clipboard_sync ENABLE ROW LEVEL SECURITY;
-
-   -- Create policy to allow all actions for anonymous access
-   CREATE POLICY "Allow all" ON clipboard_sync FOR ALL USING (true) WITH CHECK (true);
-   ```
-5. Copy your **Project URL** and **anon key** from Settings → API
-6. Paste them into the Ctrl2Phone desktop app
-
-### 🔒 Security Notes
-
-- **Use your Supabase Anon Key**, not the Service Key. The Service Key bypasses Row Level Security (RLS) and should never be distributed in client applications.
-- Make sure your Supabase Storage bucket has **RLS policies enabled** for anonymous uploads. See [Supabase RLS docs](https://supabase.com/docs/guides/storage/security/access-control) for setup.
+4. Copy your **Project URL** and **anon key** from Settings → API
+5. Paste them into the Ctrl2Phone desktop app
 
 ---
 
@@ -171,14 +183,13 @@ dotnet build -c Release -o . key_listener.cs
 
 ### Ctrl2Phone Nedir?
 
-Ctrl2Phone, masaüstünden ekran görüntüsü alıp **Gemini Web**'e yapıştırmanı, tek tuşla **telefonunun galerisine** göndermeni veya **cihazlar arası panolarını (metin ve linkler)** anında senkronize etmeni sağlayan açık kaynak bir sistemdir.
+Ctrl2Phone, masaüstünden ekran görüntüsü alıp **Gemini Web**'e yapıştırmanı veya tek tuşla **telefonunun galerisine** göndermenini sağlayan açık kaynak bir sistemdir.
 
 ### ✨ Özellikler
 
 - ⌨️ **Çift Ctrl** ile ekranı dondur, fareyle alan seç
 - 🤖 **X tuşu** ile seçimi Gemini Web'e yapıştır
 - 📱 **M tuşu** ile seçimi Supabase üzerinden telefonuna gönder
-- 📋 **Evrensel Pano**: Bilgisayarda kopyalanan metni telefon panosuna, telefonda kopyalananı bilgisayar panosuna anında aktar. Çift kopyalama kilitlenmelerini engelleyen `lastProcessedClipboardId` algoritması ve arka plan bağlantı korumalı 1.5s periyodik sorgulama (polling) mimarisi.
 - 📷 **QR Kod** ile mobil uygulamayı anında bağla
 - 🔒 **Gizlilik**: Kendi Supabase hesabın, kendi anahtarların. Üçüncü parti sunucu yok
 - 🖼️ **Kayıpsız PNG** kalitesinde ekran görüntüsü
@@ -235,44 +246,32 @@ flutter run
 1. [supabase.com](https://supabase.com) adresinde yeni proje oluşturun (ücretsiz)
 2. **Storage** → Yeni bucket oluşturun (örn: `screenshots`)
 3. Bucket'ı **Public** yapın
-4. **SQL Editor** sayfasına gidin ve aşağıdaki script'i çalıştırarak pano tablosunu oluşturun:
-   ```sql
-   CREATE TABLE clipboard_sync (
-     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-     content TEXT NOT NULL,
-     source TEXT NOT NULL CHECK (source IN ('desktop', 'mobile')),
-     created_at TIMESTAMPTZ DEFAULT NOW()
-   );
-
-   -- Row Level Security Etkinleştir
-   ALTER TABLE clipboard_sync ENABLE ROW LEVEL SECURITY;
-
-   -- Herkesin işlem yapabilmesi için politika oluştur
-   CREATE POLICY "Allow all" ON clipboard_sync FOR ALL USING (true) WITH CHECK (true);
-   ```
-5. Settings → API'den **Project URL** ve **anon key** değerlerini kopyalayın
-6. Ctrl2Phone masaüstü uygulamasına yapıştırın
+4. Settings → API'den **Project URL** ve **anon key** değerlerini kopyalayın
+5. Ctrl2Phone masaüstü uygulamasına yapıştırın
 
 ### 🔨 C# Key Listener Derleme
 
-Global kısayol dinleyicisi, çalıştırılmadan önce derlenmesi gereken küçük bir C# Windows uygulamasıdır:
+Çalıştırılmadan önce derlenmesi gereken **iki** küçük C# Windows yardımcısı var:
+
+- `key_listener.exe` — global çift-Ctrl kısayol dinleyicisi.
+- `photo_dropper.exe` — telefondan görsel geldiğinde açılan sürükle-bırak paneli. **Bunu derlemezseniz telefon→PC eşitlemesi görseli yine panoya kopyalar, ancak panel açılmaz.**
 
 ```powershell
 cd ctrl2phone/desktop/src
 
 # csc kullanarak (Windows SDK veya Visual Studio ile gelir)
 csc /target:winexe /out:key_listener.exe key_listener.cs
-
-# veya dotnet CLI ile (.NET SDK kuruluysa)
-dotnet build -c Release -o . key_listener.cs
+csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
 ```
 
-> ⚠️ **`key_listener.exe`'yi Git'e commit etmeyin.** `.gitignore`'da zaten listelenmiştir.
+> ⚠️ **`key_listener.exe` / `photo_dropper.exe`'yi Git'e commit etmeyin.** `.gitignore`'da zaten listelenmiştir.
 
 ### 🔒 Güvenlik Notları
 
-- **Supabase Service Key yerine Anon Key kullanın.** Service Key, Row Level Security (RLS) kurallarını bypass eder ve client uygulamalarda asla kullanılmamalıdır.
-- Supabase Storage bucket'ınızda anonim yükleme için **RLS politikaları** aktif olduğundan emin olun. Detaylar için [Supabase RLS dokümanlarına](https://supabase.com/docs/guides/storage/security/access-control) bakın.
+- **Supabase Service Key yerine Anon Key kullanın.** Service Key, Row Level Security (RLS) kurallarını bypass eder; bir client uygulamaya veya QR koduna **asla** konmamalıdır.
+- **Tek seferlik güvenlik kurulumunu yapın.** Masaüstü uygulamasındaki **🔒 Güvenli Kurulum (RLS)** butonuna basın: bir SQL parçacığını panoya kopyalar ve Supabase SQL Editör'ü açar — yapıştırıp **Run** deyin. Bucket'ı **gizli** yapar ve anon anahtarını *yalnızca* o bucket ile sınırlar.
+- Uygulama görselleri **kısa ömürlü signed URL**'lerle okur (kalıcı public link değil); böylece bucket gizli olunca da galeri çalışır ve ekran görüntülerine sonsuza dek açık bir bağlantı kalmaz. Dosya adları rastgele UUID'dir, tahmin/enumerasyon yapılamaz.
+- ⚠️ **Kurulum SQL'ini çalıştırana kadar bucket PUBLIC'tir** — proje URL'i + bucket adını öğrenen herkes tüm ekran görüntülerini okuyabilir. Eşleştirme QR kodunu (anon anahtarını taşır) bir şifre gibi koruyun.
 
 ---
 
@@ -283,7 +282,7 @@ dotnet build -c Release -o . key_listener.cs
 | Desktop App | Electron.js |
 | Global Hotkeys | C# (Low-level keyboard hook) |
 | Screen Capture | `screenshot-desktop` (native) |
-| Cloud Storage | Supabase Storage & Database |
+| Cloud Storage | Supabase Storage |
 | Mobile App | Flutter + Dart |
 | QR Generation | `qrcode` (Node.js) |
 
@@ -293,15 +292,15 @@ dotnet build -c Release -o . key_listener.cs
 ctrl2phone/
 ├── desktop/                # Electron desktop app
 │   ├── src/
-│   │   ├── main.ts         # Main process (capture, upload, hotkeys, polling)
-│   │   ├── preload.ts      # IPC bridge
-│   │   ├── renderer.ts     # UI logic
-│   │   ├── overlay.js      # Selection overlay logic (JS)
+│   │   ├── main.js         # Main process (capture, upload, hotkeys)
+│   │   ├── preload.js      # IPC bridge
+│   │   ├── renderer.js     # UI logic
+│   │   ├── overlay.js      # Selection overlay logic
 │   │   ├── overlay.html    # Overlay window
 │   │   ├── overlay.css     # Overlay styles
 │   │   ├── styles.css      # Main window styles
 │   │   ├── key_listener.cs # C# global keyboard hook source
-│   │   └── key_listener.exe# Build from source (see instructions above)
+│   │   └── key_listener.exe# Build from source (see instructions below)
 │   ├── index.html          # Main window
 │   └── package.json
 ├── mobile/                 # Flutter mobile app
