@@ -1,8 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
+import '../services/qr_payload.dart';
 import 'home_screen.dart';
 import 'qr_scanner_screen.dart';
 
@@ -140,49 +140,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (result == null || result is! String) return;
 
                     final messenger = ScaffoldMessenger.of(context);
-                    try {
-                      final decoded = json.decode(result);
-                      if (decoded is! Map) {
-                        throw const FormatException('Beklenmeyen QR içeriği');
-                      }
-                      final url = (decoded['url'] ?? '').toString().trim();
-                      final key = (decoded['key'] ?? '').toString().trim();
-                      final bucket = (decoded['bucket'] ?? '').toString().trim();
-
-                      if (url.isEmpty || key.isEmpty) {
-                        messenger.showSnackBar(
-                          const SnackBar(
-                            content: Text('QR kodunda Supabase URL veya anahtar bulunamadı.'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                      // Güvenlik: yalnızca https adreslerini kabul et; kötü niyetli bir
-                      // QR uygulamayı saldırgan sunucusuna yönlendiremesin.
-                      if (!url.startsWith('https://')) {
-                        messenger.showSnackBar(
-                          const SnackBar(
-                            content: Text('Güvenlik: QR adresi https:// ile başlamıyor, reddedildi.'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-
-                      setState(() {
-                        _urlController.text = url;
-                        _keyController.text = key;
-                        _bucketController.text = bucket.isEmpty ? 'SCREENSHOTS' : bucket;
-                      });
+                    // Parse + validate (https-only) in pure, unit-tested code.
+                    final parsed = parseQrPayload(result);
+                    if (!parsed.ok) {
                       messenger.showSnackBar(
-                        const SnackBar(content: Text('QR kod bilgileri başarıyla yüklendi!')),
+                        SnackBar(
+                          content: Text(parsed.error ?? kQrFormatError),
+                          // A malformed-QR message stays neutral; a rejected/incomplete
+                          // payload is shown in red, exactly as before.
+                          backgroundColor: parsed.error == kQrFormatError ? null : Colors.red,
+                        ),
                       );
-                    } catch (e) {
-                      messenger.showSnackBar(
-                        const SnackBar(content: Text('QR Kod okuma hatası: Geçersiz veri formatı.')),
-                      );
+                      return;
                     }
+
+                    setState(() {
+                      _urlController.text = parsed.url;
+                      _keyController.text = parsed.key;
+                      _bucketController.text = parsed.bucket;
+                    });
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('QR kod bilgileri başarıyla yüklendi!')),
+                    );
                   },
                   icon: const Icon(Icons.qr_code_scanner_rounded),
                   label: const Text('Masaüstünden QR Kod ile Eşitle'),

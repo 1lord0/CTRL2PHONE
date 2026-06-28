@@ -48,6 +48,8 @@ const electron_updater_1 = require("electron-updater");
 const tesseract_js_1 = __importDefault(require("tesseract.js"));
 const geometry_1 = require("./lib/geometry");
 const supabaseSetup_1 = require("./lib/supabaseSetup");
+const aiProviders_1 = require("./lib/aiProviders");
+const i18n_1 = require("./lib/i18n");
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 let mainWindow = null;
 let overlayWindow = null;
@@ -70,6 +72,11 @@ const settings = {
     autoCopyFromPhone: true,
     hotkeyVk: 0xa2, // Left Ctrl
     doublePressMs: 400,
+    aiProvider: 'web',
+    aiApiKey: '',
+    aiModel: '',
+    aiBaseUrl: '',
+    language: 'system',
 };
 const geminiUrl = 'https://gemini.google.com/app';
 let settingsPath;
@@ -257,15 +264,24 @@ function loadSettingsFromFile() {
             const data = fs.readFileSync(settingsPath, 'utf8');
             const loaded = JSON.parse(data);
             Object.assign(settings, loaded);
-            // Decrypt supabaseKey if it was encrypted with safeStorage
-            if (settings.supabaseKey && electron_1.safeStorage.isEncryptionAvailable()) {
-                try {
-                    const encrypted = Buffer.from(settings.supabaseKey, 'base64');
-                    settings.supabaseKey = electron_1.safeStorage.decryptString(encrypted);
+            // Decrypt the at-rest secrets (supabaseKey, aiApiKey) if safeStorage is available.
+            if (electron_1.safeStorage.isEncryptionAvailable()) {
+                if (settings.supabaseKey) {
+                    try {
+                        settings.supabaseKey = electron_1.safeStorage.decryptString(Buffer.from(settings.supabaseKey, 'base64'));
+                    }
+                    catch (e) {
+                        console.warn('Supabase key decryption failed, treating as plain text (backward compat):', e);
+                        // If decryption fails, key might already be plain text (backward compat)
+                    }
                 }
-                catch (e) {
-                    console.warn('Supabase key decryption failed, treating as plain text (backward compat):', e);
-                    // If decryption fails, key might already be plain text (backward compat)
+                if (settings.aiApiKey) {
+                    try {
+                        settings.aiApiKey = electron_1.safeStorage.decryptString(Buffer.from(settings.aiApiKey, 'base64'));
+                    }
+                    catch (e) {
+                        console.warn('AI key decryption failed, treating as plain text (backward compat):', e);
+                    }
                 }
             }
             console.log('Ayarlar dosyadan yüklendi:', settingsPath);
@@ -284,9 +300,15 @@ function saveSettingsToFile() {
             settingsPath = path.join(electron_1.app.getPath('userData'), 'settings.json');
         }
         const settingsToSave = { ...settings };
-        if (settings.supabaseKey && electron_1.safeStorage.isEncryptionAvailable()) {
-            const encrypted = electron_1.safeStorage.encryptString(settings.supabaseKey);
-            settingsToSave.supabaseKey = encrypted.toString('base64');
+        if (electron_1.safeStorage.isEncryptionAvailable()) {
+            if (settings.supabaseKey) {
+                settingsToSave.supabaseKey = electron_1.safeStorage
+                    .encryptString(settings.supabaseKey)
+                    .toString('base64');
+            }
+            if (settings.aiApiKey) {
+                settingsToSave.aiApiKey = electron_1.safeStorage.encryptString(settings.aiApiKey).toString('base64');
+            }
         }
         fs.writeFileSync(settingsPath, JSON.stringify(settingsToSave, null, 2), 'utf8');
         console.log('Ayarlar dosyaya kaydedildi:', settingsPath);
@@ -427,6 +449,12 @@ function sendPasteShortcut(windowInstance) {
     windowInstance.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['ctrl'] });
     windowInstance.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: ['ctrl'] });
 }
+// NOTE: status/response strings pushed from the main process (capture, AI, OCR,
+// Supabase, phone-sync flows) are currently Turkish-only. The renderer shows them
+// verbatim, so under an English UI these runtime lines stay Turkish. Static labels
+// and the settings-screen actions ARE localized (see src/lib/i18n.ts); localizing
+// the ~30 main-process call sites is a tracked low-priority follow-up that would
+// touch the core capture path.
 function setStatus(message) {
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('status', message);
@@ -685,6 +713,12 @@ async function captureAndSend() {
         hideSelectionOverlay();
         resetSelectionSession();
         electron_1.clipboard.writeImage(croppedImage);
+        // Route to a direct provider API when one is configured; otherwise fall back to
+        // the legacy "paste into the Gemini web app" flow.
+        if (isApiProviderConfigured()) {
+            await analyzeWithApi(croppedImage);
+            return;
+        }
         const windowInstance = await openGeminiWindow();
         const composerFocused = await focusGeminiComposer(windowInstance, settings.prompt);
         sendPasteShortcut(windowInstance);
@@ -696,6 +730,37 @@ async function captureAndSend() {
         setStatus('Seçim veya yapıştırma sırasında hata');
         hideSelectionOverlay();
         resetSelectionSession();
+    }
+}
+/** True when the user has picked an API provider and supplied the credentials it needs. */
+function isApiProviderConfigured() {
+    if (settings.aiProvider === 'web') {
+        return false;
+    }
+    if (settings.aiProvider === 'custom') {
+        // A local OpenAI-compatible server may need no key, but it always needs a base URL.
+        return Boolean(settings.aiBaseUrl.trim());
+    }
+    return Boolean(settings.aiApiKey.trim());
+}
+/** Send the cropped PNG + prompt to the configured provider and show the reply in-app. */
+async function analyzeWithApi(image) {
+    setStatus('Yapay zekâ analiz ediyor…');
+    setResponse('Analiz ediliyor… (yanıt birazdan burada görünecek)');
+    try {
+        const pngBase64 = image.toPNG().toString('base64');
+        const text = await (0, aiProviders_1.analyzeImage)({
+            provider: settings.aiProvider,
+            apiKey: settings.aiApiKey,
+            model: settings.aiModel,
+            baseUrl: settings.aiBaseUrl,
+        }, pngBase64, settings.prompt);
+        setResponse(text);
+        setStatus(`Yanıt alındı (${settings.aiProvider})`);
+    }
+    catch (error) {
+        setResponse(`Yapay zekâ hatası: ${error.message}`);
+        setStatus('Yapay zekâ isteği başarısız');
     }
 }
 async function captureAndSendToSupabase() {
@@ -823,6 +888,12 @@ electron_1.ipcMain.handle('app-ready', () => ({
     autoCopyFromPhone: settings.autoCopyFromPhone,
     hotkeyVk: settings.hotkeyVk,
     doublePressMs: settings.doublePressMs,
+    aiProvider: settings.aiProvider,
+    aiApiKey: settings.aiApiKey,
+    aiModel: settings.aiModel,
+    aiBaseUrl: settings.aiBaseUrl,
+    language: settings.language,
+    i18n: (0, i18n_1.getStrings)((0, i18n_1.resolveLang)(settings.language, electron_1.app.getLocale())),
     selectionActive,
 }));
 electron_1.ipcMain.handle('generate-qr', async () => {
@@ -866,6 +937,11 @@ electron_1.ipcMain.handle('save-settings', (_, nextSettings) => {
         autoCopyFromPhone: nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone,
         hotkeyVk: nextSettings.hotkeyVk ?? settings.hotkeyVk,
         doublePressMs: nextSettings.doublePressMs ?? settings.doublePressMs,
+        aiProvider: nextSettings.aiProvider ?? settings.aiProvider,
+        aiApiKey: nextSettings.aiApiKey ?? settings.aiApiKey,
+        aiModel: nextSettings.aiModel ?? settings.aiModel,
+        aiBaseUrl: nextSettings.aiBaseUrl ?? settings.aiBaseUrl,
+        language: nextSettings.language ?? settings.language,
     });
     supabaseClient = null;
     supabaseClientUrl = '';

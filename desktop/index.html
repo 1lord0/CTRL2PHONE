@@ -13,9 +13,9 @@
   <body>
     <main class="shell">
       <section class="hero">
-        <p class="eyebrow">Windows ekran aracı</p>
-        <h1>Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
-        <p class="lede">
+        <p class="eyebrow" data-i18n="hero.eyebrow">Windows ekran aracı</p>
+        <h1 data-i18n="hero.h1">Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
+        <p class="lede" data-i18n="hero.lede">
           İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra:
           X veya Enter ile Gemini'a, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna
           basın. Q ile çık.
@@ -24,30 +24,32 @@
 
       <section class="card grid">
         <label class="span-2">
-          <span>Gemini için kısa not</span>
+          <span data-i18n="label.prompt">Gemini için kısa not</span>
           <textarea
             id="prompt"
             rows="3"
+            data-i18n-ph="ph.prompt"
             placeholder="İstersen görüntüyle birlikte kullanılacak kısa bir not yaz."
           ></textarea>
         </label>
 
         <label>
-          <span>Supabase URL</span>
+          <span data-i18n="label.supabaseUrl">Supabase URL</span>
           <input type="text" id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
         </label>
 
         <label>
-          <span>Supabase Anon Key</span>
+          <span data-i18n="label.supabaseKey">Supabase Anon Key</span>
           <input
             type="password"
             id="supabaseKey"
+            data-i18n-ph="ph.supabaseKey"
             placeholder="Supabase Anon Key (Service Key kullanmayın)"
           />
         </label>
 
         <label class="span-2">
-          <span>Supabase Bucket Name</span>
+          <span data-i18n="label.supabaseBucket">Supabase Bucket Name</span>
           <input type="text" id="supabaseBucket" placeholder="screenshots" />
         </label>
 
@@ -68,25 +70,87 @@
             checked
             style="width: auto; cursor: pointer"
           />
-          <span>Telefondan gelen görselleri otomatik panoya kopyala</span>
+          <span data-i18n="label.autoCopy"
+            >Telefondan gelen görselleri otomatik panoya kopyala</span
+          >
         </label>
 
         <label>
-          <span>Kısayol tuşu (çift bas)</span>
+          <span data-i18n="label.hotkey">Kısayol tuşu (çift bas)</span>
           <select id="hotkeyVk">
-            <option value="162">Sol Ctrl</option>
-            <option value="163">Sağ Ctrl</option>
-            <option value="164">Sol Alt</option>
-            <option value="165">Sağ Alt</option>
-            <option value="160">Sol Shift</option>
-            <option value="161">Sağ Shift</option>
+            <option value="162" data-i18n="opt.leftCtrl">Sol Ctrl</option>
+            <option value="163" data-i18n="opt.rightCtrl">Sağ Ctrl</option>
+            <option value="164" data-i18n="opt.leftAlt">Sol Alt</option>
+            <option value="165" data-i18n="opt.rightAlt">Sağ Alt</option>
+            <option value="160" data-i18n="opt.leftShift">Sol Shift</option>
+            <option value="161" data-i18n="opt.rightShift">Sağ Shift</option>
           </select>
         </label>
 
         <label>
-          <span>Çift basış süresi (ms)</span>
+          <span data-i18n="label.doublePressMs">Çift basış süresi (ms)</span>
           <input type="number" id="doublePressMs" min="200" max="1000" step="50" value="400" />
         </label>
+
+        <label>
+          <span data-i18n="label.uiLanguage">Arayüz dili</span>
+          <select id="uiLanguage">
+            <option value="system" data-i18n="opt.langSystem">Sistem</option>
+            <option value="en" data-i18n="opt.langEn">English</option>
+            <option value="tr" data-i18n="opt.langTr">Türkçe</option>
+          </select>
+        </label>
+
+        <label class="span-2">
+          <span data-i18n="label.aiProvider">Yapay zekâ sağlayıcı</span>
+          <select id="aiProvider">
+            <option value="web" data-i18n="opt.aiWeb">Gemini (web — anahtar gerekmez)</option>
+            <option value="gemini" data-i18n="opt.aiGemini">Gemini API</option>
+            <option value="claude" data-i18n="opt.aiClaude">Claude API (Anthropic)</option>
+            <option value="openai" data-i18n="opt.aiOpenai">OpenAI API</option>
+            <option value="custom" data-i18n="opt.aiCustom">Özel (OpenAI uyumlu / yerel)</option>
+          </select>
+        </label>
+
+        <label id="aiApiKeyRow">
+          <span data-i18n="label.aiApiKey">API anahtarı (cihazda şifreli saklanır)</span>
+          <input
+            type="password"
+            id="aiApiKey"
+            data-i18n-ph="ph.aiApiKey"
+            placeholder="sk-... / AIza..."
+          />
+        </label>
+
+        <label id="aiModelRow">
+          <span data-i18n="label.aiModel">Model (boş = varsayılan)</span>
+          <input
+            type="text"
+            id="aiModel"
+            data-i18n-ph="ph.aiModel"
+            placeholder="örn. claude-opus-4-8"
+          />
+        </label>
+
+        <label class="span-2" id="aiBaseUrlRow" style="display: none">
+          <span data-i18n="label.aiBaseUrl">Özel sunucu adresi (base URL)</span>
+          <input
+            type="text"
+            id="aiBaseUrl"
+            data-i18n-ph="ph.aiBaseUrl"
+            placeholder="http://localhost:11434/v1"
+          />
+        </label>
+
+        <p
+          class="span-2"
+          id="aiProviderHint"
+          data-i18n="hint.aiProvider"
+          style="margin: 0; font-size: 12px; opacity: 0.7"
+        >
+          "Web" modunda görsel gemini.google.com'a yapıştırılır. Bir API sağlayıcı seçip anahtar
+          girersen, seçtiğin alan API'ye gönderilir ve yanıt doğrudan burada gösterilir.
+        </p>
 
         <div
           class="storage-usage-container span-2"
@@ -103,7 +167,7 @@
               color: #f8fafc;
             "
           >
-            <span>Supabase Bulut Depolama</span>
+            <span data-i18n="label.storage">Supabase Bulut Depolama</span>
             <span id="storageText" style="color: #94a3b8">0.0 MB / 1024 MB (0.0%)</span>
           </div>
           <div
@@ -141,7 +205,7 @@
             gap: 8px;
           "
         >
-          <span style="font-size: 12px; color: #94a3b8"
+          <span style="font-size: 12px; color: #94a3b8" data-i18n="label.qr"
             >Telefonda Ayarlardan QR ile Eşitlemek İçin:</span
           >
           <img
@@ -157,7 +221,7 @@
         </div>
 
         <div class="actions span-2" style="display: flex; gap: 12px; margin-top: 5px">
-          <button id="saveSettings" style="flex: 2">Ayarları kaydet</button>
+          <button id="saveSettings" style="flex: 2" data-i18n="btn.save">Ayarları kaydet</button>
           <button
             id="purgeStorage"
             style="
@@ -169,6 +233,7 @@
               cursor: pointer;
               transition: all 0.2s;
             "
+            data-i18n="btn.purge"
           >
             Bulutu Temizle
           </button>
@@ -177,6 +242,7 @@
         <button
           id="setupRls"
           class="span-2"
+          data-i18n="btn.setupRls"
           style="
             margin-top: 8px;
             background: rgba(59, 130, 246, 0.12);
@@ -189,7 +255,11 @@
         >
           🔒 Güvenli Kurulum: RLS SQL'ini kopyala &amp; Supabase'i aç
         </button>
-        <p class="span-2" style="font-size: 11px; color: #94a3b8; margin: -2px 0 0">
+        <p
+          class="span-2"
+          data-i18n="hint.setupRls"
+          style="font-size: 11px; color: #94a3b8; margin: -2px 0 0"
+        >
           Tek seferlik: butona bas → SQL panoya kopyalanır ve Supabase SQL Editör açılır →
           yapıştırıp <strong>Run</strong> de. Bucket'ı gizli yapar, anon anahtarını yalnızca bu
           bucket ile sınırlar.
@@ -198,10 +268,11 @@
 
       <section class="card status-card">
         <div class="status-line">
-          <span>Durum</span>
+          <span data-i18n="label.status">Durum</span>
+          <!-- #status / #response hold live runtime text; localized in renderer, not via the data-i18n sweep -->
           <strong id="status">Hazır</strong>
         </div>
-        <pre id="response" class="response">Gemini cevabı burada görünecek.</pre>
+        <pre id="response" class="response">Yapay zekâ yanıtı burada görünecek.</pre>
       </section>
     </main>
 

@@ -26,6 +26,8 @@ import {
   computeCropRect,
 } from './lib/geometry';
 import { buildRlsSetupSql } from './lib/supabaseSetup';
+import { analyzeImage, AiProvider } from './lib/aiProviders';
+import { resolveLang, getStrings } from './lib/i18n';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
@@ -51,6 +53,11 @@ const settings: AppSettings = {
   autoCopyFromPhone: true,
   hotkeyVk: 0xa2, // Left Ctrl
   doublePressMs: 400,
+  aiProvider: 'web',
+  aiApiKey: '',
+  aiModel: '',
+  aiBaseUrl: '',
+  language: 'system',
 };
 
 const geminiUrl = 'https://gemini.google.com/app';
@@ -275,17 +282,27 @@ function loadSettingsFromFile(): void {
       const loaded = JSON.parse(data) as Partial<AppSettings>;
       Object.assign(settings, loaded);
 
-      // Decrypt supabaseKey if it was encrypted with safeStorage
-      if (settings.supabaseKey && safeStorage.isEncryptionAvailable()) {
-        try {
-          const encrypted = Buffer.from(settings.supabaseKey, 'base64');
-          settings.supabaseKey = safeStorage.decryptString(encrypted);
-        } catch (e) {
-          console.warn(
-            'Supabase key decryption failed, treating as plain text (backward compat):',
-            e
-          );
-          // If decryption fails, key might already be plain text (backward compat)
+      // Decrypt the at-rest secrets (supabaseKey, aiApiKey) if safeStorage is available.
+      if (safeStorage.isEncryptionAvailable()) {
+        if (settings.supabaseKey) {
+          try {
+            settings.supabaseKey = safeStorage.decryptString(
+              Buffer.from(settings.supabaseKey, 'base64')
+            );
+          } catch (e) {
+            console.warn(
+              'Supabase key decryption failed, treating as plain text (backward compat):',
+              e
+            );
+            // If decryption fails, key might already be plain text (backward compat)
+          }
+        }
+        if (settings.aiApiKey) {
+          try {
+            settings.aiApiKey = safeStorage.decryptString(Buffer.from(settings.aiApiKey, 'base64'));
+          } catch (e) {
+            console.warn('AI key decryption failed, treating as plain text (backward compat):', e);
+          }
         }
       }
 
@@ -305,9 +322,15 @@ function saveSettingsToFile(): void {
     }
 
     const settingsToSave = { ...settings };
-    if (settings.supabaseKey && safeStorage.isEncryptionAvailable()) {
-      const encrypted = safeStorage.encryptString(settings.supabaseKey);
-      settingsToSave.supabaseKey = encrypted.toString('base64');
+    if (safeStorage.isEncryptionAvailable()) {
+      if (settings.supabaseKey) {
+        settingsToSave.supabaseKey = safeStorage
+          .encryptString(settings.supabaseKey)
+          .toString('base64');
+      }
+      if (settings.aiApiKey) {
+        settingsToSave.aiApiKey = safeStorage.encryptString(settings.aiApiKey).toString('base64');
+      }
     }
 
     fs.writeFileSync(settingsPath, JSON.stringify(settingsToSave, null, 2), 'utf8');
@@ -474,6 +497,12 @@ function sendPasteShortcut(windowInstance: BrowserWindow): void {
   windowInstance.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: ['ctrl'] });
 }
 
+// NOTE: status/response strings pushed from the main process (capture, AI, OCR,
+// Supabase, phone-sync flows) are currently Turkish-only. The renderer shows them
+// verbatim, so under an English UI these runtime lines stay Turkish. Static labels
+// and the settings-screen actions ARE localized (see src/lib/i18n.ts); localizing
+// the ~30 main-process call sites is a tracked low-priority follow-up that would
+// touch the core capture path.
 function setStatus(message: string): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('status', message);
@@ -766,6 +795,13 @@ async function captureAndSend(): Promise<void> {
 
     clipboard.writeImage(croppedImage);
 
+    // Route to a direct provider API when one is configured; otherwise fall back to
+    // the legacy "paste into the Gemini web app" flow.
+    if (isApiProviderConfigured()) {
+      await analyzeWithApi(croppedImage);
+      return;
+    }
+
     const windowInstance = await openGeminiWindow();
     const composerFocused = await focusGeminiComposer(windowInstance, settings.prompt);
 
@@ -780,6 +816,42 @@ async function captureAndSend(): Promise<void> {
     setStatus('Seçim veya yapıştırma sırasında hata');
     hideSelectionOverlay();
     resetSelectionSession();
+  }
+}
+
+/** True when the user has picked an API provider and supplied the credentials it needs. */
+function isApiProviderConfigured(): boolean {
+  if (settings.aiProvider === 'web') {
+    return false;
+  }
+  if (settings.aiProvider === 'custom') {
+    // A local OpenAI-compatible server may need no key, but it always needs a base URL.
+    return Boolean(settings.aiBaseUrl.trim());
+  }
+  return Boolean(settings.aiApiKey.trim());
+}
+
+/** Send the cropped PNG + prompt to the configured provider and show the reply in-app. */
+async function analyzeWithApi(image: Electron.NativeImage): Promise<void> {
+  setStatus('Yapay zekâ analiz ediyor…');
+  setResponse('Analiz ediliyor… (yanıt birazdan burada görünecek)');
+  try {
+    const pngBase64 = image.toPNG().toString('base64');
+    const text = await analyzeImage(
+      {
+        provider: settings.aiProvider as AiProvider,
+        apiKey: settings.aiApiKey,
+        model: settings.aiModel,
+        baseUrl: settings.aiBaseUrl,
+      },
+      pngBase64,
+      settings.prompt
+    );
+    setResponse(text);
+    setStatus(`Yanıt alındı (${settings.aiProvider})`);
+  } catch (error: any) {
+    setResponse(`Yapay zekâ hatası: ${error.message}`);
+    setStatus('Yapay zekâ isteği başarısız');
   }
 }
 
@@ -931,6 +1003,12 @@ ipcMain.handle('app-ready', () => ({
   autoCopyFromPhone: settings.autoCopyFromPhone,
   hotkeyVk: settings.hotkeyVk,
   doublePressMs: settings.doublePressMs,
+  aiProvider: settings.aiProvider,
+  aiApiKey: settings.aiApiKey,
+  aiModel: settings.aiModel,
+  aiBaseUrl: settings.aiBaseUrl,
+  language: settings.language,
+  i18n: getStrings(resolveLang(settings.language, app.getLocale())),
   selectionActive,
 }));
 
@@ -975,6 +1053,11 @@ ipcMain.handle('save-settings', (_, nextSettings: Partial<AppSettings>) => {
     autoCopyFromPhone: nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone,
     hotkeyVk: nextSettings.hotkeyVk ?? settings.hotkeyVk,
     doublePressMs: nextSettings.doublePressMs ?? settings.doublePressMs,
+    aiProvider: nextSettings.aiProvider ?? settings.aiProvider,
+    aiApiKey: nextSettings.aiApiKey ?? settings.aiApiKey,
+    aiModel: nextSettings.aiModel ?? settings.aiModel,
+    aiBaseUrl: nextSettings.aiBaseUrl ?? settings.aiBaseUrl,
+    language: nextSettings.language ?? settings.language,
   });
 
   supabaseClient = null;

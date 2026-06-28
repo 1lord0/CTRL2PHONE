@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'gallery_paging.dart';
 
 // ============================================================
 // Supabase Service: Dinamik Bağlantı + Storage Listeleme
@@ -88,16 +89,10 @@ class SupabaseService {
 
       // Sayfalamayı HAM sunucu sayısına göre yap (filtrelemeden önce); böylece
       // .keep / to_pc / gizli kayıtları gizlemek galeriyi erken kesmez.
-      final bool hasMore = objects.length == limit;
+      final bool hasMore = computeHasMore(objects.length, limit);
 
       // Filtreleme: Klasörler veya gizli sistem dosyalarını temizle (to_pc klasörü dahil)
-      final files = objects
-          .where((obj) =>
-              obj.name != null &&
-              !obj.name.startsWith('.') &&
-              !obj.name.endsWith('.keep') &&
-              obj.name != 'to_pc')
-          .toList();
+      final files = objects.where((obj) => isVisiblePhotoName(obj.name)).toList();
 
       // Kısa ömürlü signed URL üret: bucket private olsa da görseller yüklenir
       // ve kalıcı herkese-açık bir bağlantı bırakılmaz. İmzalama başarısızsa

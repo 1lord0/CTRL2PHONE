@@ -38,10 +38,12 @@ No cloud accounts needed on our side — **you bring your own Supabase** (free t
 |---|---|
 | 🖥️ **Instant Screen Freeze** | Double Ctrl captures your display in <30ms (RAM-based, no disk write) |
 | ✂️ **Pixel-Perfect Selection** | Draw any rectangle, multi-monitor aware |
-| 🤖 **Gemini Integration** | Press X to paste selection directly into Gemini Web |
+| 🤖 **Multi-provider AI** | Press X to send the selection to Gemini, Claude, OpenAI or a local model — or paste into Gemini Web (default, no key needed) |
 | 📱 **Phone Sync** | Press M to upload to Supabase → open mobile app → image in your gallery |
+| 🔤 **OCR** | Press C to extract text (Turkish + English) from the selection to your clipboard |
 | 📷 **QR Setup** | Scan QR code from desktop app to configure mobile app instantly |
 | 🔒 **Privacy First** | Your keys, your storage. No third-party servers. Fully open source |
+| 🌐 **English / Türkçe UI** | Interface language follows your OS by default; switch EN/TR in settings |
 | 🎯 **Smart Key Blocking** | Hotkeys only intercept when selection overlay is active (won't mute YouTube!) |
 | 🖼️ **Lossless PNG** | Screenshots uploaded in full PNG quality |
 
@@ -53,7 +55,7 @@ No cloud accounts needed on our side — **you bring your own Supabase** (free t
 │   (Electron)     │────▶│   Storage Bucket  │◀────│   (Flutter)      │
 │                  │     │                   │     │                  │
 │ • C# Key Hook   │     │ • PNG files       │     │ • QR Scanner     │
-│ • Screen Capture │     │ • Public URLs     │     │ • Gallery Save   │
+│ • Screen Capture │     │ • Signed URLs     │     │ • Gallery Save   │
 │ • Gemini Paste   │     │ • Free tier OK    │     │ • Auto Download  │
 └──────────────────┘     └──────────────────┘     └──────────────────┘
 ```
@@ -100,13 +102,27 @@ flutter run
 | Shortcut | Action |
 |---|---|
 | `Ctrl` `Ctrl` (double tap) | Open selection overlay |
-| `X` or `Enter` | Send selection to Gemini Web |
+| `X` or `Enter` | Send selection to your AI provider (Gemini web by default; or Gemini/Claude/OpenAI/local API with the reply shown in-app) |
 | `M` | Upload selection to Supabase (→ Phone) |
 | `C` | Extract text from selection (OCR → clipboard) |
 | `Esc` | Cancel selection |
 | `Q` | Quit application |
 
 > The **trigger key** (Left Ctrl by default — choose Left/Right Ctrl, Alt or Shift) and the **double-tap window** (ms) are configurable in the desktop app settings.
+
+### 🤖 AI Providers
+
+Pressing **X** sends the selected region to whichever backend you pick in **Settings → AI provider**:
+
+| Provider | Needs a key? | Notes |
+|---|---|---|
+| **Gemini (web)** | No | Default. Pastes the crop into `gemini.google.com` in a built-in window |
+| **Gemini API** | Yes | Google AI Studio key; reply shown in-app |
+| **Claude API** | Yes | Anthropic key; defaults to `claude-opus-4-8`, reply shown in-app |
+| **OpenAI API** | Yes | OpenAI key; defaults to `gpt-4o`, reply shown in-app |
+| **Custom (OpenAI-compatible)** | Optional | Point the **base URL** at a local server (Ollama, LM Studio) or a gateway (OpenRouter) |
+
+Your API key is stored **encrypted on your device** (Electron `safeStorage`) and is sent only to the provider you choose. With any API provider the model's reply appears directly in the app's response pane — no browser needed. The prompt note (top of settings) is sent alongside the image.
 
 ### 📋 Prerequisites
 
@@ -139,6 +155,7 @@ csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
 - **Run the one-time security setup.** In the desktop app click the **🔒 Secure Setup (RLS)** button (labeled *"Güvenli Kurulum…"*): it copies a SQL snippet and opens your Supabase SQL Editor — paste it and press **Run**. It makes your bucket **private** and scopes the anon key to *only* that bucket.
 - The app reads images through **short-lived signed URLs** (not permanent public links), so the gallery keeps working after the bucket is private, and there is no forever-public handle to your screenshots. Filenames are random UUIDs, so they can't be enumerated.
 - ⚠️ **Until you run the setup SQL the bucket is PUBLIC** — anyone who learns your project URL + bucket name can read every screenshot. Treat the pairing QR code (which carries your anon key) like a password.
+- 📄 For assets, trust boundaries, attacker scenarios and residual risks, see the [**Threat Model**](docs/THREAT_MODEL.md).
 
 <details><summary>The SQL the button runs (for bucket <code>screenshots</code>)</summary>
 
@@ -173,9 +190,11 @@ The in-app button generates this for *your* actual bucket name. See [Supabase St
 
 1. Create a new project at [supabase.com](https://supabase.com)
 2. Go to **Storage** → Create a new bucket (e.g., `screenshots`)
-3. Set the bucket to **Public**
-4. Copy your **Project URL** and **anon key** from Settings → API
-5. Paste them into the Ctrl2Phone desktop app
+3. Copy your **Project URL** and **anon key** from Settings → API
+4. Paste them into the Ctrl2Phone desktop app and click **Save settings**
+5. Click **🔒 Secure Setup (RLS)** and run the SQL it copies — this makes the bucket **private** and locks the anon key to this one bucket (see [Security Notes](#-security-notes))
+
+> ⚠️ Older versions told you to make the bucket **Public**. Don't — run the Secure Setup instead. The app reads images through short-lived **signed URLs**, so a private bucket works end-to-end and your screenshots are never world-readable.
 
 ---
 
@@ -245,9 +264,11 @@ flutter run
 
 1. [supabase.com](https://supabase.com) adresinde yeni proje oluşturun (ücretsiz)
 2. **Storage** → Yeni bucket oluşturun (örn: `screenshots`)
-3. Bucket'ı **Public** yapın
-4. Settings → API'den **Project URL** ve **anon key** değerlerini kopyalayın
-5. Ctrl2Phone masaüstü uygulamasına yapıştırın
+3. Settings → API'den **Project URL** ve **anon key** değerlerini kopyalayın
+4. Ctrl2Phone masaüstü uygulamasına yapıştırıp **Ayarları kaydet** deyin
+5. **🔒 Güvenli Kurulum (RLS)** butonuna basıp kopyalanan SQL'i çalıştırın — bu, bucket'ı **gizli** yapar ve anon anahtarını yalnızca bu bucket ile sınırlar (bkz. [Güvenlik Notları](#-güvenlik-notları))
+
+> ⚠️ Eski sürümler bucket'ı **Public** yapmanızı söylüyordu. Yapmayın — bunun yerine Güvenli Kurulum'u çalıştırın. Uygulama görselleri kısa ömürlü **signed URL**'lerle okuduğu için gizli bucket uçtan uca çalışır ve ekran görüntüleriniz herkese açık olmaz.
 
 ### 🔨 C# Key Listener Derleme
 
@@ -290,21 +311,28 @@ csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
 
 ```
 ctrl2phone/
-├── desktop/                # Electron desktop app
+├── desktop/                  # Electron desktop app (TypeScript → compiled to .js)
 │   ├── src/
-│   │   ├── main.js         # Main process (capture, upload, hotkeys)
-│   │   ├── preload.js      # IPC bridge
-│   │   ├── renderer.js     # UI logic
-│   │   ├── overlay.js      # Selection overlay logic
-│   │   ├── overlay.html    # Overlay window
-│   │   ├── overlay.css     # Overlay styles
-│   │   ├── styles.css      # Main window styles
-│   │   ├── key_listener.cs # C# global keyboard hook source
-│   │   └── key_listener.exe# Build from source (see instructions below)
-│   ├── index.html          # Main window
+│   │   ├── main.ts           # Main process (capture, AI routing, upload, hotkeys)
+│   │   ├── preload.ts        # contextBridge IPC bridge
+│   │   ├── renderer.ts       # Settings UI + i18n application
+│   │   ├── overlay.ts        # Selection + annotation overlay logic
+│   │   ├── types.ts          # Shared types (AppSettings, BridgeAPI)
+│   │   ├── lib/              # Pure, unit-tested logic
+│   │   │   ├── geometry.ts    # Crop / scale / virtual-bounds math
+│   │   │   ├── aiProviders.ts # Multi-provider AI request builders + parsers
+│   │   │   ├── supabaseSetup.ts # RLS setup SQL generator
+│   │   │   └── i18n.ts        # EN/TR string dictionaries + locale resolver
+│   │   ├── overlay.html / overlay.css / styles.css
+│   │   ├── key_listener.cs    # C# global keyboard hook source (compile to .exe)
+│   │   └── photo_dropper.cs   # C# phone→PC drag-drop panel (compile to .exe)
+│   ├── test/                 # Jest unit tests (geometry, aiProviders, i18n, …)
+│   ├── index.html            # Main window
 │   └── package.json
-├── mobile/                 # Flutter mobile app
+├── mobile/                   # Flutter mobile app
 │   └── ...
+├── docs/
+│   └── THREAT_MODEL.md       # Security threat model
 ├── LICENSE
 └── README.md
 ```
