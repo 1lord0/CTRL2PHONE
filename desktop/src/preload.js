@@ -20,5 +20,6 @@ const bridge = {
     getStorageUsage: () => electron_1.ipcRenderer.invoke('get-storage-usage'),
     purgeStorage: () => electron_1.ipcRenderer.invoke('purge-storage'),
     setupRls: () => electron_1.ipcRenderer.invoke('setup-rls'),
+    sendClipboard: () => electron_1.ipcRenderer.invoke('send-clipboard'),
 };
 electron_1.contextBridge.exposeInMainWorld('bridge', bridge);

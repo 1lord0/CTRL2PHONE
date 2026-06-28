@@ -13,12 +13,15 @@ class KeyListener
     private const int WM_SYSKEYUP = 0x0105;
 
     private const int VK_LCONTROL = 0xA2;
+    private const int VK_RCONTROL = 0xA3;
+    private const int VK_LSHIFT = 0xA0;
+    private const int VK_RSHIFT = 0xA1;
+    private const int VK_V = 0x56;
     private const int VK_X = 0x58;
     private const int VK_ESCAPE = 0x1B;
     private const int VK_RETURN = 0x0D;
     private const int VK_M = 0x4D;
     private const int VK_Q = 0x51;
-    private const int VK_C = 0x43;
 
     private static LowLevelKeyboardProc _proc = HookCallback;
     private static IntPtr _hookID = IntPtr.Zero;
@@ -33,6 +36,8 @@ class KeyListener
     private static volatile int _thresholdMs = 400;
 
     private static volatile bool _selectionActive = false;
+    private static volatile bool _ctrlHeld = false;
+    private static volatile bool _shiftHeld = false;
     private static long _selectionActiveSinceMs = 0;
     // Safety valve: if Electron dies without sending INACTIVE, never block keys
     // (X/M/Esc/Enter/Q) globally forever — auto-release after this many ms.
@@ -123,6 +128,16 @@ class KeyListener
                 bool isKeyUp = wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP;
                 bool isKeyDown = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
 
+                // Track modifier key states
+                if (vkCode == VK_LCONTROL || vkCode == VK_RCONTROL)
+                {
+                    _ctrlHeld = isKeyDown;
+                }
+                if (vkCode == VK_LSHIFT || vkCode == VK_RSHIFT)
+                {
+                    _shiftHeld = isKeyDown;
+                }
+
                 // Any non-trigger key pressed in between two taps invalidates the
                 // pending tap. This stops Ctrl+C / Ctrl+V bursts (and combos like
                 // Ctrl+Shift+...) from being misread as a double-press.
@@ -146,6 +161,14 @@ class KeyListener
                     }
                 }
 
+                // Ctrl+Shift+V — global clipboard send (works outside selection mode)
+                if (vkCode == VK_V && isKeyDown && _ctrlHeld && _shiftHeld)
+                {
+                    Console.WriteLine("CTRL_SHIFT_V");
+                    Console.Out.Flush();
+                    return (IntPtr)1; // Block the key
+                }
+
                 // Watchdog: auto-release a stuck selection so global key blocking can
                 // never persist if the Electron side crashed mid-session.
                 if (_selectionActive && _clock.ElapsedMilliseconds - _selectionActiveSinceMs > SelectionMaxMs)
@@ -156,7 +179,7 @@ class KeyListener
                 // If selection is active, block these keys on both down and up events
                 if (_selectionActive)
                 {
-                    if (vkCode == VK_X || vkCode == VK_M || vkCode == VK_ESCAPE || vkCode == VK_RETURN || vkCode == VK_Q || vkCode == VK_C)
+                    if (vkCode == VK_X || vkCode == VK_M || vkCode == VK_ESCAPE || vkCode == VK_RETURN || vkCode == VK_Q)
                     {
                         if (isKeyUp)
                         {
@@ -165,7 +188,6 @@ class KeyListener
                             else if (vkCode == VK_ESCAPE) Console.WriteLine("KEY_ESCAPE");
                             else if (vkCode == VK_RETURN) Console.WriteLine("KEY_RETURN");
                             else if (vkCode == VK_Q) Console.WriteLine("KEY_Q");
-                            else if (vkCode == VK_C) Console.WriteLine("KEY_C");
                             Console.Out.Flush();
                         }
                         return (IntPtr)1; // Block key from reaching other applications

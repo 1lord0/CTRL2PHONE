@@ -289,3 +289,18 @@ document.getElementById('purgeStorage')?.addEventListener('click', async () => {
     showStatus(t('status.genericError', 'Hata: ') + e.message);
   }
 });
+
+document.getElementById('sendClipboard')?.addEventListener('click', async () => {
+  showStatus(t('status.sendingClipboard', 'Metin telefona gönderiliyor...'));
+  try {
+    const result = await window.bridge.sendClipboard();
+    if (!result?.ok) {
+      showStatus(
+        t('status.sendClipboardError', 'Gönderim hatası: ') +
+          (result?.error || t('status.unknownError', 'Bilinmeyen hata'))
+      );
+    }
+  } catch (e: any) {
+    showStatus(t('status.genericError', 'Hata: ') + e.message);
+  }
+});

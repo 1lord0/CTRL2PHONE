@@ -15,11 +15,8 @@ extraResources:
     to: src/key_listener.exe
   - from: src/photo_dropper.exe
     to: src/photo_dropper.exe
-# tesseract.js spawns a worker + wasm core that cannot be loaded from inside the
-# asar archive, so keep them unpacked.
-asarUnpack:
-  - '**/node_modules/tesseract.js/**'
-  - '**/node_modules/tesseract.js-core/**'
+  - from: src/ocr_helper.exe
+    to: src/ocr_helper.exe
 # win:
 #   target:
 #     - nsis

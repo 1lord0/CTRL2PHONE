@@ -14,7 +14,7 @@ const en: Strings = {
   'hero.eyebrow': 'Windows screen tool',
   'hero.h1': 'Select with double Ctrl, send with X (AI) or M (Phone)',
   'hero.lede':
-    'Double-tap Left Ctrl to open the selection overlay. After drawing a region: X or Enter sends it to your AI provider, M sends it to your phone. Press Esc to cancel, Q to quit.',
+    'Double-tap Left Ctrl to open the selection overlay. After drawing a region: X or Enter sends it to your AI provider, M sends it to your phone. Press Esc to cancel, Q to quit.\n📋 Ctrl+Shift+V → Send clipboard text/link to phone instantly.',
   'label.prompt': 'Prompt for the AI',
   'ph.prompt': 'Optionally write a short note to send along with the image.',
   'label.supabaseUrl': 'Supabase URL',
@@ -22,6 +22,8 @@ const en: Strings = {
   'ph.supabaseKey': 'Supabase Anon Key (do not use the Service Key)',
   'label.supabaseBucket': 'Supabase Bucket Name',
   'label.autoCopy': 'Auto-copy images received from the phone to the clipboard',
+  'label.hotkeySettingsHeader': 'Advanced Hotkey Settings',
+  'label.aiSettingsHeader': 'AI and Language Settings',
   'label.hotkey': 'Trigger key (double tap)',
   'opt.leftCtrl': 'Left Ctrl',
   'opt.rightCtrl': 'Right Ctrl',
@@ -47,6 +49,7 @@ const en: Strings = {
   'label.storage': 'Supabase Cloud Storage',
   'label.qr': 'To pair via QR from the phone Settings:',
   'btn.save': 'Save settings',
+  'btn.sendClipboard': '📋 Send Clipboard',
   'btn.purge': 'Purge Cloud',
   'btn.setupRls': '🔒 Secure Setup: copy the RLS SQL & open Supabase',
   'hint.setupRls':
@@ -64,6 +67,8 @@ const en: Strings = {
   'status.rlsError': 'RLS setup error: ',
   'status.genericError': 'Error: ',
   'status.unknownError': 'Unknown error',
+  'status.sendingClipboard': 'Sending clipboard to phone...',
+  'status.sendClipboardError': 'Clipboard send error: ',
   'response.rlsPrefix':
     'The SQL below was copied — paste it into the Supabase SQL Editor and press Run:\n\n',
   'confirm.purge':
@@ -80,7 +85,7 @@ const tr: Strings = {
   'hero.eyebrow': 'Windows ekran aracı',
   'hero.h1': 'Çift Ctrl ile seç, X (Yapay Zekâ) veya M (Telefon) ile gönder',
   'hero.lede':
-    "İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra: X veya Enter ile yapay zekâ sağlayıcına, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna basın. Q ile çık.",
+    "İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra: X veya Enter ile yapay zekâ sağlayıcına, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna basın. Q ile çık.\n📋 Ctrl+Shift+V → Panodaki metni/linki anında telefona gönderir.",
   'label.prompt': 'Yapay zekâ için kısa not',
   'ph.prompt': 'İstersen görüntüyle birlikte kullanılacak kısa bir not yaz.',
   'label.supabaseUrl': 'Supabase URL',
@@ -88,6 +93,8 @@ const tr: Strings = {
   'ph.supabaseKey': 'Supabase Anon Key (Service Key kullanmayın)',
   'label.supabaseBucket': 'Supabase Bucket Name',
   'label.autoCopy': 'Telefondan gelen görselleri otomatik panoya kopyala',
+  'label.hotkeySettingsHeader': 'Gelişmiş Kısayol Ayarları',
+  'label.aiSettingsHeader': 'Yapay Zekâ ve Dil Ayarları',
   'label.hotkey': 'Kısayol tuşu (çift bas)',
   'opt.leftCtrl': 'Sol Ctrl',
   'opt.rightCtrl': 'Sağ Ctrl',
@@ -113,6 +120,7 @@ const tr: Strings = {
   'label.storage': 'Supabase Bulut Depolama',
   'label.qr': 'Telefonda Ayarlardan QR ile Eşitlemek İçin:',
   'btn.save': 'Ayarları kaydet',
+  'btn.sendClipboard': '📋 Telefona Gönder',
   'btn.purge': 'Bulutu Temizle',
   'btn.setupRls': "🔒 Güvenli Kurulum: RLS SQL'ini kopyala & Supabase'i aç",
   'hint.setupRls':
@@ -131,6 +139,8 @@ const tr: Strings = {
   'status.rlsError': 'RLS kurulum hatası: ',
   'status.genericError': 'Hata: ',
   'status.unknownError': 'Bilinmeyen hata',
+  'status.sendingClipboard': 'Metin telefona gönderiliyor...',
+  'status.sendClipboardError': 'Gönderim hatası: ',
   'response.rlsPrefix':
     "Aşağıdaki SQL panoya kopyalandı — Supabase SQL Editör'e yapıştırıp Run deyin:\n\n",
   'confirm.purge':

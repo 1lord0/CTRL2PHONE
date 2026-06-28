@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'gallery_paging.dart';
 
@@ -239,6 +241,87 @@ class SupabaseService {
       return filesToDelete.length;
     } catch (e) {
       throw Exception('Temizleme hatası: $e');
+    }
+  }
+
+  // ============================================================
+  // Clipboard Sync: Metin/Link Paylaşımı (Polling)
+  // ============================================================
+
+  static Timer? _clipboardTimer;
+  static bool _isPollingClipboard = false;
+  static String? _lastProcessedClipboardId;
+
+  /// Masaüstünden gelen metinleri dinlemek için 1.5 saniyelik polling başlatır.
+  /// [onReceived] callback'i yeni metin geldiğinde çağrılır.
+  static void subscribeToClipboard(void Function(String content) onReceived) {
+    if (!isInitialized || _clientInstance == null) return;
+
+    // Önce mevcut polling'i kapat
+    unsubscribeClipboard();
+
+    _clipboardTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) async {
+      if (_isPollingClipboard) return;
+      _isPollingClipboard = true;
+
+      try {
+        final List<dynamic> response = await _clientInstance!
+            .from('clipboard_sync')
+            .select()
+            .eq('source', 'desktop')
+            .order('created_at', ascending: true)
+            .limit(1);
+
+        if (response.isNotEmpty) {
+          final row = response.first;
+          final id = row['id'] as String?;
+          if (id != _lastProcessedClipboardId) {
+            _lastProcessedClipboardId = id;
+            final content = row['content'] as String?;
+            if (content != null && content.isNotEmpty) {
+              onReceived(content);
+            }
+          }
+
+          if (id != null) {
+            await _clientInstance!
+                .from('clipboard_sync')
+                .delete()
+                .eq('id', id);
+          }
+        }
+      } catch (e) {
+        debugPrint('Clipboard polling error: $e');
+      } finally {
+        _isPollingClipboard = false;
+      }
+    });
+
+    debugPrint('Clipboard polling initialized (1.5s)');
+  }
+
+  /// Polling'i kapatır.
+  static void unsubscribeClipboard() {
+    if (_clipboardTimer != null) {
+      _clipboardTimer!.cancel();
+      _clipboardTimer = null;
+      debugPrint('Clipboard polling stopped');
+    }
+  }
+
+  /// Telefondaki metni masaüstüne göndermek için clipboard_sync tablosuna INSERT eder.
+  Future<void> sendClipboardText(String text) async {
+    if (!isInitialized) {
+      throw Exception('Supabase henüz başlatılmadı.');
+    }
+
+    try {
+      await _client!.from('clipboard_sync').insert({
+        'content': text,
+        'source': 'mobile',
+      });
+    } catch (e) {
+      throw Exception('Metin gönderilemedi: $e');
     }
   }
 }

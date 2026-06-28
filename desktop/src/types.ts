@@ -73,6 +73,7 @@ export interface BridgeAPI {
   }>;
   purgeStorage: () => Promise<{ ok: boolean; deletedCount?: number; error?: string }>;
   setupRls: () => Promise<{ ok: boolean; sql?: string; error?: string }>;
+  sendClipboard: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 declare global {

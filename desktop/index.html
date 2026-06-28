@@ -75,82 +75,96 @@
           >
         </label>
 
-        <label>
-          <span data-i18n="label.hotkey">Kısayol tuşu (çift bas)</span>
-          <select id="hotkeyVk">
-            <option value="162" data-i18n="opt.leftCtrl">Sol Ctrl</option>
-            <option value="163" data-i18n="opt.rightCtrl">Sağ Ctrl</option>
-            <option value="164" data-i18n="opt.leftAlt">Sol Alt</option>
-            <option value="165" data-i18n="opt.rightAlt">Sağ Alt</option>
-            <option value="160" data-i18n="opt.leftShift">Sol Shift</option>
-            <option value="161" data-i18n="opt.rightShift">Sağ Shift</option>
-          </select>
-        </label>
+        <details class="span-2" style="cursor: pointer; outline: none; margin-top: 5px; margin-bottom: 5px;">
+          <summary style="font-size: 13px; font-weight: bold; color: #60a5fa; user-select: none;">
+            ⚙️ <span data-i18n="label.hotkeySettingsHeader">Gelişmiş Kısayol Ayarları</span>
+          </summary>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; cursor: default;" onclick="event.stopPropagation()">
+            <label style="margin-top: 0;">
+              <span data-i18n="label.hotkey">Kısayol tuşu (çift bas)</span>
+              <select id="hotkeyVk">
+                <option value="162" data-i18n="opt.leftCtrl">Sol Ctrl</option>
+                <option value="163" data-i18n="opt.rightCtrl">Sağ Ctrl</option>
+                <option value="164" data-i18n="opt.leftAlt">Sol Alt</option>
+                <option value="165" data-i18n="opt.rightAlt">Sağ Alt</option>
+                <option value="160" data-i18n="opt.leftShift">Sol Shift</option>
+                <option value="161" data-i18n="opt.rightShift">Sağ Shift</option>
+              </select>
+            </label>
 
-        <label>
-          <span data-i18n="label.doublePressMs">Çift basış süresi (ms)</span>
-          <input type="number" id="doublePressMs" min="200" max="1000" step="50" value="400" />
-        </label>
+            <label style="margin-top: 0;">
+              <span data-i18n="label.doublePressMs">Çift basış süresi (ms)</span>
+              <input type="number" id="doublePressMs" min="200" max="1000" step="50" value="400" />
+            </label>
+          </div>
+        </details>
 
-        <label>
-          <span data-i18n="label.uiLanguage">Arayüz dili</span>
-          <select id="uiLanguage">
-            <option value="system" data-i18n="opt.langSystem">Sistem</option>
-            <option value="en" data-i18n="opt.langEn">English</option>
-            <option value="tr" data-i18n="opt.langTr">Türkçe</option>
-          </select>
-        </label>
+        <details class="span-2" style="cursor: pointer; outline: none; margin-top: 5px; margin-bottom: 5px;">
+          <summary style="font-size: 13px; font-weight: bold; color: #60a5fa; user-select: none;">
+            🤖 <span data-i18n="label.aiSettingsHeader">Yapay Zekâ ve Dil Ayarları</span>
+          </summary>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; cursor: default;" onclick="event.stopPropagation()">
+            <label class="span-2" style="margin-top: 0;">
+              <span data-i18n="label.uiLanguage">Arayüz dili</span>
+              <select id="uiLanguage">
+                <option value="system" data-i18n="opt.langSystem">Sistem</option>
+                <option value="en" data-i18n="opt.langEn">English</option>
+                <option value="tr" data-i18n="opt.langTr">Türkçe</option>
+              </select>
+            </label>
 
-        <label class="span-2">
-          <span data-i18n="label.aiProvider">Yapay zekâ sağlayıcı</span>
-          <select id="aiProvider">
-            <option value="web" data-i18n="opt.aiWeb">Gemini (web — anahtar gerekmez)</option>
-            <option value="gemini" data-i18n="opt.aiGemini">Gemini API</option>
-            <option value="claude" data-i18n="opt.aiClaude">Claude API (Anthropic)</option>
-            <option value="openai" data-i18n="opt.aiOpenai">OpenAI API</option>
-            <option value="custom" data-i18n="opt.aiCustom">Özel (OpenAI uyumlu / yerel)</option>
-          </select>
-        </label>
+            <label class="span-2">
+              <span data-i18n="label.aiProvider">Yapay zekâ sağlayıcı</span>
+              <select id="aiProvider">
+                <option value="web" data-i18n="opt.aiWeb">Gemini (web — anahtar gerekmez)</option>
+                <option value="gemini" data-i18n="opt.aiGemini">Gemini API</option>
+                <option value="claude" data-i18n="opt.aiClaude">Claude API (Anthropic)</option>
+                <option value="openai" data-i18n="opt.aiOpenai">OpenAI API</option>
+                <option value="custom" data-i18n="opt.aiCustom">Özel (OpenAI uyumlu / yerel)</option>
+              </select>
+            </label>
 
-        <label id="aiApiKeyRow">
-          <span data-i18n="label.aiApiKey">API anahtarı (cihazda şifreli saklanır)</span>
-          <input
-            type="password"
-            id="aiApiKey"
-            data-i18n-ph="ph.aiApiKey"
-            placeholder="sk-... / AIza..."
-          />
-        </label>
+            <label id="aiApiKeyRow">
+              <span data-i18n="label.aiApiKey">API anahtarı (cihazda şifreli saklanır)</span>
+              <input
+                type="password"
+                id="aiApiKey"
+                data-i18n-ph="ph.aiApiKey"
+                placeholder="sk-... / AIza..."
+              />
+            </label>
 
-        <label id="aiModelRow">
-          <span data-i18n="label.aiModel">Model (boş = varsayılan)</span>
-          <input
-            type="text"
-            id="aiModel"
-            data-i18n-ph="ph.aiModel"
-            placeholder="örn. claude-opus-4-8"
-          />
-        </label>
+            <label id="aiModelRow">
+              <span data-i18n="label.aiModel">Model (boş = varsayılan)</span>
+              <input
+                type="text"
+                id="aiModel"
+                data-i18n-ph="ph.aiModel"
+                placeholder="örn. claude-opus-4-8"
+              />
+            </label>
 
-        <label class="span-2" id="aiBaseUrlRow" style="display: none">
-          <span data-i18n="label.aiBaseUrl">Özel sunucu adresi (base URL)</span>
-          <input
-            type="text"
-            id="aiBaseUrl"
-            data-i18n-ph="ph.aiBaseUrl"
-            placeholder="http://localhost:11434/v1"
-          />
-        </label>
+            <label class="span-2" id="aiBaseUrlRow" style="display: none">
+              <span data-i18n="label.aiBaseUrl">Özel sunucu adresi (base URL)</span>
+              <input
+                type="text"
+                id="aiBaseUrl"
+                data-i18n-ph="ph.aiBaseUrl"
+                placeholder="http://localhost:11434/v1"
+              />
+            </label>
 
-        <p
-          class="span-2"
-          id="aiProviderHint"
-          data-i18n="hint.aiProvider"
-          style="margin: 0; font-size: 12px; opacity: 0.7"
-        >
-          "Web" modunda görsel gemini.google.com'a yapıştırılır. Bir API sağlayıcı seçip anahtar
-          girersen, seçtiğin alan API'ye gönderilir ve yanıt doğrudan burada gösterilir.
-        </p>
+            <p
+              class="span-2"
+              id="aiProviderHint"
+              data-i18n="hint.aiProvider"
+              style="margin: 0; font-size: 12px; opacity: 0.7"
+            >
+              "Web" modunda görsel gemini.google.com'a yapıştırılır. Bir API sağlayıcı seçip anahtar
+              girersen, seçtiğin alan API'ye gönderilir ve yanıt doğrudan burada gösterilir.
+            </p>
+          </div>
+        </details>
 
         <div
           class="storage-usage-container span-2"
@@ -222,6 +236,21 @@
 
         <div class="actions span-2" style="display: flex; gap: 12px; margin-top: 5px">
           <button id="saveSettings" style="flex: 2" data-i18n="btn.save">Ayarları kaydet</button>
+          <button
+            id="sendClipboard"
+            style="
+              flex: 1.5;
+              background: rgba(59, 130, 246, 0.12);
+              border: 1px solid rgba(59, 130, 246, 0.3);
+              color: #60a5fa;
+              font-weight: bold;
+              cursor: pointer;
+              transition: all 0.2s;
+            "
+            data-i18n="btn.sendClipboard"
+          >
+            📋 Telefona Gönder
+          </button>
           <button
             id="purgeStorage"
             style="

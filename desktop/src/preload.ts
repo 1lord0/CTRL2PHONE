@@ -21,6 +21,7 @@ const bridge: BridgeAPI = {
   getStorageUsage: () => ipcRenderer.invoke('get-storage-usage'),
   purgeStorage: () => ipcRenderer.invoke('purge-storage'),
   setupRls: () => ipcRenderer.invoke('setup-rls'),
+  sendClipboard: () => ipcRenderer.invoke('send-clipboard'),
 };
 
 contextBridge.exposeInMainWorld('bridge', bridge);

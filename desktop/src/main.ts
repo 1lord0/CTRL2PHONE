@@ -17,7 +17,6 @@ import screenshot from 'screenshot-desktop';
 import QRCode from 'qrcode';
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { autoUpdater } from 'electron-updater';
-import Tesseract from 'tesseract.js';
 import { AppSettings, Rect } from './types';
 import {
   getVirtualBounds as computeVirtualBounds,
@@ -65,6 +64,9 @@ const geminiUrl = 'https://gemini.google.com/app';
 let settingsPath: string | undefined;
 let phoneSyncInterval: NodeJS.Timeout | null = null;
 let phoneSyncChannel: RealtimeChannel | null = null;
+let clipboardSyncInterval: NodeJS.Timeout | null = null;
+let isCheckingClipboard = false;
+let lastProcessedClipboardId: string | null = null;
 
 function stopPhoneSyncPolling(): void {
   if (phoneSyncInterval) {
@@ -79,6 +81,119 @@ function stopPhoneSyncPolling(): void {
     }
     phoneSyncChannel = null;
   }
+}
+
+function stopClipboardPolling(): void {
+  if (clipboardSyncInterval) {
+    clearInterval(clipboardSyncInterval);
+    clipboardSyncInterval = null;
+  }
+}
+
+async function sendClipboardToPhone(): Promise<{ ok: boolean; error?: string }> {
+  const text = clipboard.readText();
+  if (!text || !text.trim()) {
+    setStatus('Panoda kopyalanmış metin bulunamadı');
+    return { ok: false, error: 'Panoda metin yok' };
+  }
+
+  const client = ensureSupabaseClient();
+  if (!client) {
+    setStatus('Supabase ayarları eksik!');
+    return { ok: false, error: 'Supabase ayarları eksik' };
+  }
+
+  try {
+    const { error } = await client.from('clipboard_sync').insert({
+      content: text.trim(),
+      source: 'desktop',
+    });
+
+    if (error) throw new Error(error.message);
+
+    const { Notification } = require('electron');
+    if (Notification.isSupported()) {
+      const preview = text.trim().length > 60 ? text.trim().substring(0, 60) + '...' : text.trim();
+      new Notification({
+        title: 'Metin Telefona Gönderildi',
+        body: preview,
+        silent: false,
+      }).show();
+    }
+
+    setStatus('Pano metni telefona gönderildi');
+    setResponse(`Gönderilen metin: ${text.trim().substring(0, 200)}`);
+    return { ok: true };
+  } catch (err: any) {
+    console.error('Clipboard send error:', err);
+    setStatus('Metin gönderme hatası: ' + err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+async function checkClipboardFromMobile(): Promise<void> {
+  if (isCheckingClipboard) return;
+  const client = ensureSupabaseClient();
+  if (!client) return;
+
+  isCheckingClipboard = true;
+  try {
+    const { data, error } = await client
+      .from('clipboard_sync')
+      .select('*')
+      .eq('source', 'mobile')
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    if (error) {
+      console.warn('Clipboard poll error:', error.message);
+      return;
+    }
+
+    if (data && data.length > 0) {
+      const row = data[0];
+      if (row.id !== lastProcessedClipboardId) {
+        lastProcessedClipboardId = row.id;
+        const content = row.content;
+        if (content) {
+          clipboard.writeText(content);
+
+          const { Notification } = require('electron');
+          if (Notification.isSupported()) {
+            const preview = content.length > 60 ? content.substring(0, 60) + '...' : content;
+            new Notification({
+              title: 'Telefondan Metin Alındı',
+              body: preview,
+              silent: false,
+            }).show();
+          }
+
+          setStatus('Telefondan metin alındı');
+          setResponse(`Alınan metin: ${content.substring(0, 200)}`);
+        }
+      }
+
+      // Always try to delete the record from database to keep it clean
+      await client.from('clipboard_sync').delete().eq('id', row.id);
+    }
+  } catch (err) {
+    console.error('checkClipboardFromMobile error:', err);
+  } finally {
+    isCheckingClipboard = false;
+  }
+}
+
+function setupClipboardPolling(): void {
+  stopClipboardPolling();
+
+  const client = ensureSupabaseClient();
+  if (!client) {
+    console.log('Clipboard polling: waiting for Supabase settings');
+    return;
+  }
+
+  clipboardSyncInterval = setInterval(checkClipboardFromMobile, 1500);
+  console.log('Clipboard polling initialized (1.5s)');
 }
 
 // Lazily (re)create the Supabase client when settings are present. Returns null
@@ -673,6 +788,7 @@ function getPhotoDropperPath(): string | null {
   return null;
 }
 
+
 function startKeyListener(): void {
   stopKeyListener();
 
@@ -740,14 +856,8 @@ function handleGlobalKeyEvent(event: string): void {
       }
       captureAndSendToSupabase();
     }
-  } else if (event === 'KEY_C') {
-    if (selectionActive) {
-      if (!selectionRect) {
-        setStatus('Önce fareyle bir alan seç.');
-        return;
-      }
-      captureAndExtractText();
-    }
+  } else if (event === 'CTRL_SHIFT_V') {
+    sendClipboardToPhone();
   } else if (event === 'KEY_ESCAPE') {
     if (selectionActive) {
       hideSelectionOverlay();
@@ -941,59 +1051,6 @@ async function captureAndSendToSupabase(): Promise<void> {
   }
 }
 
-async function captureAndExtractText(): Promise<void> {
-  try {
-    if (!selectionRect || !selectionDisplay || !capturedScreenImage) {
-      setStatus('Seçim alanı veya yakalanan ekran resmi bulunamadı');
-      hideSelectionOverlay();
-      resetSelectionSession();
-      return;
-    }
-
-    const absoluteRect = toAbsoluteRect(selectionRect);
-    const display = selectionDisplay;
-    const clampedRect = clampRectToDisplay(absoluteRect, display.bounds);
-
-    if (clampedRect.width <= 0 || clampedRect.height <= 0) {
-      setStatus('Geçersiz seçim alanı');
-      hideSelectionOverlay();
-      resetSelectionSession();
-      return;
-    }
-
-    const croppedImage =
-      (await getAnnotatedComposite()) ??
-      cropImageToSelection(capturedScreenImage, clampedRect, display);
-    const pngBuffer = croppedImage.toPNG();
-
-    // Give control back immediately; OCR can take a couple of seconds.
-    hideSelectionOverlay();
-    resetSelectionSession();
-    setStatus('Metin tanınıyor (OCR)...');
-
-    const {
-      data: { text },
-    } = await Tesseract.recognize(pngBuffer, 'eng+tur');
-    const cleaned = text.trim();
-
-    if (cleaned) {
-      clipboard.writeText(cleaned);
-      setResponse(`Tanınan metin panoya kopyalandı:\n\n${cleaned}`);
-      setStatus('Metin panoya kopyalandı (OCR)');
-    } else {
-      setResponse('Seçili alanda metin bulunamadı.');
-      setStatus('Metin bulunamadı');
-    }
-  } catch (error: any) {
-    console.error('OCR error:', error);
-    setResponse(
-      `OCR hatası: ${error.message}\n(İlk kullanımda dil modeli indirilir; internet bağlantısı gerekir.)`
-    );
-    setStatus('OCR hatası');
-    hideSelectionOverlay();
-    resetSelectionSession();
-  }
-}
 
 ipcMain.handle('app-ready', () => ({
   prompt: settings.prompt,
@@ -1011,6 +1068,10 @@ ipcMain.handle('app-ready', () => ({
   i18n: getStrings(resolveLang(settings.language, app.getLocale())),
   selectionActive,
 }));
+
+ipcMain.handle('send-clipboard', async () => {
+  return sendClipboardToPhone();
+});
 
 ipcMain.handle('generate-qr', async () => {
   try {
@@ -1035,8 +1096,18 @@ ipcMain.handle('setup-rls', async () => {
     const bucket = settings.supabaseBucket || 'screenshots';
     const sql = buildRlsSetupSql(bucket);
     clipboard.writeText(sql);
-    // Deep-link to the user's last-used project SQL editor (the '_' placeholder).
-    await shell.openExternal('https://supabase.com/dashboard/project/_/sql/new');
+    
+    // Extract project reference ID from settings.supabaseUrl (e.g. xyzabc from https://xyzabc.supabase.co)
+    let projectRef = '_';
+    if (settings.supabaseUrl) {
+      const match = settings.supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/i);
+      if (match) {
+        projectRef = match[1];
+      }
+    }
+
+    // Deep-link directly to the user's project SQL editor
+    await shell.openExternal(`https://supabase.com/dashboard/project/${projectRef}/sql/new`);
     return { ok: true, sql };
   } catch (error: any) {
     console.error('RLS kurulum hatası:', error);
@@ -1066,6 +1137,7 @@ ipcMain.handle('save-settings', (_, nextSettings: Partial<AppSettings>) => {
   sendKeyListenerConfig();
   saveSettingsToFile();
   setupPhoneSyncPolling();
+  setupClipboardPolling();
   return { ok: true };
 });
 
@@ -1302,6 +1374,7 @@ if (!gotTheLock) {
       setStatus('Klavye dinleyici bulunamadı (key_listener.exe derlenmemiş olabilir).');
     }
     setupPhoneSyncPolling();
+    setupClipboardPolling();
 
     setTimeout(() => {
       ensureGeminiWindowLoaded().catch((e) => console.error('Gemini ön-yükleme hatası:', e));
@@ -1327,6 +1400,7 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   stopKeyListener();
   stopPhoneSyncPolling();
+  stopClipboardPolling();
 });
 
 app.on('window-all-closed', () => {
