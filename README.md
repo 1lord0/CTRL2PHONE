@@ -40,7 +40,7 @@ No cloud accounts needed on our side — **you bring your own Supabase** (free t
 | ✂️ **Pixel-Perfect Selection** | Draw any rectangle, multi-monitor aware |
 | 🤖 **Multi-provider AI** | Press X to send the selection to Gemini, Claude, OpenAI or a local model — or paste into Gemini Web (default, no key needed) |
 | 📱 **Phone Sync** | Press M to upload to Supabase → open mobile app → image in your gallery |
-| 🔤 **OCR** | Press C to extract text (Turkish + English) from the selection to your clipboard |
+| 📋 **Universal Clipboard** | Sync clipboard text/links bidirectionally: PC-to-Phone (Ctrl+Shift+V / button) and Phone-to-PC (FAB button) |
 | 📷 **QR Setup** | Scan QR code from desktop app to configure mobile app instantly |
 | 🔒 **Privacy First** | Your keys, your storage. No third-party servers. Fully open source |
 | 🌐 **English / Türkçe UI** | Interface language follows your OS by default; switch EN/TR in settings |
@@ -104,7 +104,7 @@ flutter run
 | `Ctrl` `Ctrl` (double tap) | Open selection overlay |
 | `X` or `Enter` | Send selection to your AI provider (Gemini web by default; or Gemini/Claude/OpenAI/local API with the reply shown in-app) |
 | `M` | Upload selection to Supabase (→ Phone) |
-| `C` | Extract text from selection (OCR → clipboard) |
+| `Ctrl + Shift + V` | Send your PC clipboard text/link to your phone instantly (works globally) |
 | `Esc` | Cancel selection |
 | `Q` | Quit application |
 
@@ -269,6 +269,15 @@ flutter run
 5. **🔒 Güvenli Kurulum (RLS)** butonuna basıp kopyalanan SQL'i çalıştırın — bu, bucket'ı **gizli** yapar ve anon anahtarını yalnızca bu bucket ile sınırlar (bkz. [Güvenlik Notları](#-güvenlik-notları))
 
 > ⚠️ Eski sürümler bucket'ı **Public** yapmanızı söylüyordu. Yapmayın — bunun yerine Güvenli Kurulum'u çalıştırın. Uygulama görselleri kısa ömürlü **signed URL**'lerle okuduğu için gizli bucket uçtan uca çalışır ve ekran görüntüleriniz herkese açık olmaz.
+
+### 📋 Universal Clipboard (Pano Eşitleme)
+
+Bilgisayarınız ile telefonunuz arasında metin veya bağlantıları (link) anlık olarak kopyalayıp eşitleyebilirsiniz:
+
+1. **PC → Telefon**: Bilgisayarınızda kopyaladığınız herhangi bir metin veya bağlantıyı panodayken **`Ctrl + Shift + V`** kısayoluna basarak veya arayüzdeki **"Panoyu Telefona Gönder"** butonuna tıklayarak anlık olarak telefonunuzun panosuna gönderebilirsiniz. Telefonunuzda anında bir bildirim görünecektir.
+2. **Telefon → PC**: Mobil uygulamada sağ alttaki butona tıklayıp **"Panodan Gönder"** veya **"Metin Yaz"** seçeneğini kullanarak telefonunuzdaki metni anlık olarak bilgisayarınızın panosuna aktarabilirsiniz. Bilgisayarınızda bir bildirim penceresi açılacaktır.
+
+> 💡 Pano verileriniz Supabase Realtime (WebSocket) ile anlık iletildikten hemen sonra veritabanından otomatik olarak silinir, böylece veritabanınız temiz ve güvenli kalır.
 
 ### 🔨 C# Key Listener Derleme
 
