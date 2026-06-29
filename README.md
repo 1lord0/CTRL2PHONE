@@ -60,11 +60,6 @@ No cloud accounts needed on our side — **you bring your own Supabase** (free t
 └──────────────────┘     └──────────────────┘     └──────────────────┘
 ```
 
-### 📥 Downloads
-
-You can download the pre-compiled installer for Windows (`.exe`) and the Android application (`.apk`) directly from Google Drive:
-👉 **[Download Ctrl2Phone (Windows & Android)](https://drive.google.com/drive/u/0/folders/1ux5WS0Wt8KEGsiJrXqTOhdoDFR1wMANM)**
-
 ### 🚀 Quick Start
 
 #### Desktop App
