@@ -209,10 +209,6 @@ Ctrl2Phone, masaüstünden ekran görüntüsü alıp **Gemini Web**'e yapıştı
 - 🖼️ **Kayıpsız PNG** kalitesinde ekran görüntüsü
 - 🎯 **Akıllı Tuş Engelleme**: Kısayollar sadece seçim modu açıkken çalışır
 
-### 📥 İndir (Hazır Kurulum)
-
-Windows kurulum programını (`.exe`) ve Android uygulamasını (`.apk`) doğrudan Google Drive üzerinden indirebilirsiniz:
-👉 **[Ctrl2Phone İndir (Windows & Android)](https://drive.google.com/drive/u/0/folders/1ux5WS0Wt8KEGsiJrXqTOhdoDFR1wMANM)**
 
 ### 🚀 Hızlı Başlangıç
 
