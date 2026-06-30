@@ -10,6 +10,8 @@ files:
   - src/**/*.css
   - index.html
   - package.json
+asarUnpack:
+  - "**/node_modules/screenshot-desktop/**/*"
 extraResources:
   - from: src/key_listener.exe
     to: src/key_listener.exe
