@@ -31,22 +31,25 @@
       <button class="tool-btn" id="toolUndo" title="Geri al">↶</button>
       <button class="tool-btn" id="toolClear" title="Temizle">🗑</button>
     </div>
-    <div id="selectionBox" class="selection-box hidden">
-      <div id="actionBar" class="action-bar hidden">
-        <button
-          class="action-btn gemini"
-          id="btnGemini"
-          title="Seçimi Gemini'a gönderir (X veya Enter)"
-        >
-          <span class="btn-icon">✧</span> Gemini
-        </button>
-        <button class="action-btn phone" id="btnPhone" title="Seçimi telefona gönderir (M)">
-          <span class="btn-icon">📱</span> Telefon
-        </button>
-        <button class="action-btn cancel" id="btnCancel" title="İptal et (Esc)">
-          <span class="btn-icon">✕</span> İptal
-        </button>
-      </div>
+    <div id="selectionBox" class="selection-box hidden"></div>
+    <div id="actionBar" class="action-bar hidden">
+      <button
+        type="button"
+        class="action-btn gemini"
+        id="btnGemini"
+        title="Seçimi Gemini'a gönderir (X veya Enter)"
+      >
+        <span class="btn-icon">G</span> Gemini
+      </button>
+      <button type="button" class="action-btn phone" id="btnPhone" title="Seçimi telefona gönderir (M)">
+        <span class="btn-icon">M</span> Telefon
+      </button>
+      <button type="button" class="action-btn ocr" id="btnOcr" title="Metni oku ve panoya kopyala (C)">
+        <span class="btn-icon">C</span> OCR
+      </button>
+      <button type="button" class="action-btn cancel" id="btnCancel" title="İptal et (Esc)">
+        <span class="btn-icon">X</span> İptal
+      </button>
     </div>
     <script src="./overlay.js"></script>
   </body>

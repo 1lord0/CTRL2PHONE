@@ -10,17 +10,31 @@
     <title>Gemini Ekran Yakalama</title>
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
-  <body>
-    <main class="shell">
-      <section class="hero">
-        <p class="eyebrow" data-i18n="hero.eyebrow">Windows ekran aracı</p>
-        <h1 data-i18n="hero.h1">Çift Ctrl ile seç, X (Gemini) veya M (Telefon) ile gönder</h1>
-        <p class="lede" data-i18n="hero.lede">
-          İki kere üst üste sol Ctrl'e basınca seçim katmanı açılır. Fareyle alanı çizdikten sonra:
-          X veya Enter ile Gemini'a, M ile Telefona gönderirsiniz. İptal etmek için Esc tuşuna
-          basın. Q ile çık.
+  <body data-panel-mode="presented">
+    <div class="spotlight-panel" id="spotlightPanel" data-mode="presented">
+      <header class="panel-chrome">
+        <div class="panel-brand-wrap">
+          <span class="panel-mark" aria-hidden="true">⌕</span>
+          <span class="panel-brand">Ctrl2Phone</span>
+        </div>
+        <div class="panel-chrome-actions">
+          <button type="button" id="pinPanel" class="panel-pin no-drag" title="Sabitle" aria-pressed="false" aria-label="Sabitle">Pin</button>
+          <button type="button" id="dismissPanel" class="panel-close no-drag" title="Kapat (Esc)" aria-label="Kapat">X</button>
+        </div>
+      </header>
+
+      <div class="panel-body" id="panelBody">
+      <div class="panel-hero">
+        <div class="hero-shortcuts" aria-hidden="true">
+          <span class="shortcut-chip"><kbd>2xCtrl</kbd></span>
+          <span class="shortcut-chip chip-ai"><kbd>X</kbd></span>
+          <span class="shortcut-chip chip-phone"><kbd>M</kbd></span>
+          <span class="shortcut-chip chip-ocr"><kbd>C</kbd></span>
+        </div>
+        <p class="panel-tagline" data-i18n="panel.tagline">
+          Çift Ctrl → yakala (HUD görünür kalır) · Ctrl+Shift+Space → panel · Esc → kapat
         </p>
-      </section>
+      </div>
 
       <section class="card grid">
         <label class="span-2">
@@ -53,34 +67,19 @@
           <input type="text" id="supabaseBucket" placeholder="screenshots" />
         </label>
 
-        <label
-          class="span-2"
-          style="
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            user-select: none;
-            margin-top: 5px;
-          "
-        >
-          <input
-            type="checkbox"
-            id="autoCopyFromPhone"
-            checked
-            style="width: auto; cursor: pointer"
-          />
+        <label class="span-2 checkbox-row">
+          <input type="checkbox" id="autoCopyFromPhone" checked />
           <span data-i18n="label.autoCopy"
             >Telefondan gelen görselleri otomatik panoya kopyala</span
           >
         </label>
 
-        <details class="span-2" style="cursor: pointer; outline: none; margin-top: 5px; margin-bottom: 5px;">
-          <summary style="font-size: 13px; font-weight: bold; color: #60a5fa; user-select: none;">
-            ⚙️ <span data-i18n="label.hotkeySettingsHeader">Gelişmiş Kısayol Ayarları</span>
+        <details class="span-2 panel-details">
+          <summary>
+            <span data-i18n="label.hotkeySettingsHeader">Gelişmiş Kısayol Ayarları</span>
           </summary>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; cursor: default;" onclick="event.stopPropagation()">
-            <label style="margin-top: 0;">
+          <div class="details-grid" onclick="event.stopPropagation()">
+            <label class="details-field">
               <span data-i18n="label.hotkey">Kısayol tuşu (çift bas)</span>
               <select id="hotkeyVk">
                 <option value="162" data-i18n="opt.leftCtrl">Sol Ctrl</option>
@@ -92,19 +91,19 @@
               </select>
             </label>
 
-            <label style="margin-top: 0;">
+            <label class="details-field">
               <span data-i18n="label.doublePressMs">Çift basış süresi (ms)</span>
               <input type="number" id="doublePressMs" min="200" max="1000" step="50" value="400" />
             </label>
           </div>
         </details>
 
-        <details class="span-2" style="cursor: pointer; outline: none; margin-top: 5px; margin-bottom: 5px;">
-          <summary style="font-size: 13px; font-weight: bold; color: #60a5fa; user-select: none;">
-            🤖 <span data-i18n="label.aiSettingsHeader">Yapay Zekâ ve Dil Ayarları</span>
+        <details class="span-2 panel-details">
+          <summary>
+            <span data-i18n="label.aiSettingsHeader">Yapay Zeka ve Dil Ayarları</span>
           </summary>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; cursor: default;" onclick="event.stopPropagation()">
-            <label class="span-2" style="margin-top: 0;">
+          <div class="details-grid" onclick="event.stopPropagation()">
+            <label class="span-2 details-field">
               <span data-i18n="label.uiLanguage">Arayüz dili</span>
               <select id="uiLanguage">
                 <option value="system" data-i18n="opt.langSystem">Sistem</option>
@@ -114,9 +113,9 @@
             </label>
 
             <label class="span-2">
-              <span data-i18n="label.aiProvider">Yapay zekâ sağlayıcı</span>
+              <span data-i18n="label.aiProvider">Yapay zeka sağlayıcı</span>
               <select id="aiProvider">
-                <option value="web" data-i18n="opt.aiWeb">Gemini (web — anahtar gerekmez)</option>
+                <option value="web" data-i18n="opt.aiWeb">Gemini (web - anahtar gerekmez)</option>
                 <option value="gemini" data-i18n="opt.aiGemini">Gemini API</option>
                 <option value="claude" data-i18n="opt.aiClaude">Claude API (Anthropic)</option>
                 <option value="openai" data-i18n="opt.aiOpenai">OpenAI API</option>
@@ -154,141 +153,44 @@
               />
             </label>
 
-            <p
-              class="span-2"
-              id="aiProviderHint"
-              data-i18n="hint.aiProvider"
-              style="margin: 0; font-size: 12px; opacity: 0.7"
-            >
+            <p class="span-2 field-hint" id="aiProviderHint" data-i18n="hint.aiProvider">
               "Web" modunda görsel gemini.google.com'a yapıştırılır. Bir API sağlayıcı seçip anahtar
               girersen, seçtiğin alan API'ye gönderilir ve yanıt doğrudan burada gösterilir.
             </p>
           </div>
         </details>
 
-        <div
-          class="storage-usage-container span-2"
-          style="margin-top: 10px; display: none"
-          id="storageContainer"
-        >
-          <div
-            style="
-              display: flex;
-              justify-content: space-between;
-              font-size: 12px;
-              font-weight: bold;
-              margin-bottom: 6px;
-              color: #f8fafc;
-            "
-          >
+        <div class="storage-widget span-2 hidden" id="storageContainer">
+          <div class="storage-widget-head">
             <span data-i18n="label.storage">Supabase Bulut Depolama</span>
-            <span id="storageText" style="color: #94a3b8">0.0 MB / 1024 MB (0.0%)</span>
+            <span id="storageText">0.0 MB / 1024 MB (0.0%)</span>
           </div>
-          <div
-            style="
-              width: 100%;
-              height: 8px;
-              background: #1e293b;
-              border-radius: 4px;
-              overflow: hidden;
-              border: 1px solid rgba(255, 255, 255, 0.05);
-            "
-          >
-            <div
-              id="storageBar"
-              style="
-                width: 0%;
-                height: 100%;
-                background: #3b82f6;
-                border-radius: 4px;
-                transition:
-                  width 0.3s ease,
-                  background-color 0.3s ease;
-              "
-            ></div>
+          <div class="storage-track">
+            <div id="storageBar" class="storage-fill"></div>
           </div>
         </div>
 
-        <div
-          class="qr-container span-2"
-          style="
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin-top: 10px;
-            gap: 8px;
-          "
-        >
-          <span style="font-size: 12px; color: #94a3b8" data-i18n="label.qr"
+        <div class="qr-block span-2">
+          <span class="qr-label" data-i18n="label.qr"
             >Telefonda Ayarlardan QR ile Eşitlemek İçin:</span
           >
-          <img
-            id="qrCodeImage"
-            style="
-              width: 140px;
-              height: 140px;
-              display: none;
-              border-radius: 8px;
-              border: 4px solid white;
-            "
-          />
+          <img id="qrCodeImage" class="qr-image hidden" alt="" />
         </div>
 
-        <div class="actions span-2" style="display: flex; gap: 12px; margin-top: 5px">
-          <button id="saveSettings" style="flex: 2" data-i18n="btn.save">Ayarları kaydet</button>
-          <button
-            id="sendClipboard"
-            style="
-              flex: 1.5;
-              background: rgba(59, 130, 246, 0.12);
-              border: 1px solid rgba(59, 130, 246, 0.3);
-              color: #60a5fa;
-              font-weight: bold;
-              cursor: pointer;
-              transition: all 0.2s;
-            "
-            data-i18n="btn.sendClipboard"
-          >
-            📋 Telefona Gönder
+        <div class="actions span-2 actions-main">
+          <button id="saveSettings" class="btn-primary btn-grow-2" data-i18n="btn.save">Ayarları kaydet</button>
+          <button id="sendClipboard" class="btn-accent btn-grow" data-i18n="btn.sendClipboard">
+            Telefona Gönder
           </button>
-          <button
-            id="purgeStorage"
-            style="
-              flex: 1;
-              background: rgba(239, 68, 68, 0.12);
-              border: 1px solid rgba(239, 68, 68, 0.3);
-              color: #f87171;
-              font-weight: bold;
-              cursor: pointer;
-              transition: all 0.2s;
-            "
-            data-i18n="btn.purge"
-          >
+          <button id="purgeStorage" class="btn-danger btn-grow" data-i18n="btn.purge">
             Bulutu Temizle
           </button>
         </div>
 
-        <button
-          id="setupRls"
-          class="span-2"
-          data-i18n="btn.setupRls"
-          style="
-            margin-top: 8px;
-            background: rgba(59, 130, 246, 0.12);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            color: #93c5fd;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.2s;
-          "
-        >
-          🔒 Güvenli Kurulum: RLS SQL'ini kopyala &amp; Supabase'i aç
+        <button id="setupRls" class="span-2 btn-ghost" data-i18n="btn.setupRls">
+          Güvenli Kurulum: RLS SQL kopyala ve Supabase aç
         </button>
-        <p
-          class="span-2"
-          data-i18n="hint.setupRls"
-          style="font-size: 11px; color: #94a3b8; margin: -2px 0 0"
-        >
+        <p class="span-2 hint-text" data-i18n="hint.setupRls">
           Tek seferlik: butona bas → SQL panoya kopyalanır ve Supabase SQL Editör açılır →
           yapıştırıp <strong>Run</strong> de. Bucket'ı gizli yapar, anon anahtarını yalnızca bu
           bucket ile sınırlar.
@@ -297,13 +199,17 @@
 
       <section class="card status-card">
         <div class="status-line">
-          <span data-i18n="label.status">Durum</span>
-          <!-- #status / #response hold live runtime text; localized in renderer, not via the data-i18n sweep -->
-          <strong id="status">Hazır</strong>
+          <span class="status-label" data-i18n="label.status">Durum</span>
+          <div class="status-value">
+            <span id="statusDot" class="status-dot is-ready" aria-hidden="true"></span>
+            <!-- #status / #response hold live runtime text; localized in renderer, not via the data-i18n sweep -->
+            <strong id="status">Hazır</strong>
+          </div>
         </div>
-        <pre id="response" class="response">Yapay zekâ yanıtı burada görünecek.</pre>
+        <pre id="response" class="response">Yapay zeka yanıtı burada görünecek.</pre>
       </section>
-    </main>
+      </div>
+    </div>
 
     <script src="./src/renderer.js"></script>
   </body>

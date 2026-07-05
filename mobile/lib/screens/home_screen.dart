@@ -26,10 +26,15 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _scrollController = ScrollController();
     _scrollController.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<PhotosProvider>();
-      provider.loadPhotos();
+      await provider.initialize();
       provider.listenForNewPhotos();
+      if (provider.photos.isEmpty) {
+        await provider.loadPhotos();
+      } else {
+        await provider.loadPhotos(refresh: true);
+      }
       _fetchStorageUsage();
       _startClipboardListener();
     });
@@ -108,7 +113,8 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          context.read<PhotosProvider>().refresh();
+          await context.read<PhotosProvider>().clearGalleryCache();
+          await context.read<PhotosProvider>().refresh();
           _fetchStorageUsage();
         }
       } catch (e) {

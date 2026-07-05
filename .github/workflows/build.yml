@@ -61,7 +61,9 @@ jobs:
       - name: Compile C# Helpers
         run: |
           cd src
-          csc /target:winexe /out:key_listener.exe key_listener.cs
+          csc /nologo /reference:System.Windows.Forms.dll /target:exe /out:key_listener.exe key_listener.cs
+          csc /nologo /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /target:winexe /out:pill_hud.exe pill_hud.cs
+          csc /nologo /target:exe /out:round_window.exe round_window.cs
           csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
         shell: cmd
 

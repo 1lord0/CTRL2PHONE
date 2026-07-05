@@ -81,7 +81,7 @@ kbd {
   padding: 2px 5px;
   font-family: monospace;
   font-weight: bold;
-  color: #3b82f6;
+  color: #4f8cff;
   font-size: 0.75rem;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
@@ -89,35 +89,31 @@ kbd {
 /* ── Selection Box & Actions ───────────────────────────────────── */
 .selection-box {
   position: fixed;
-  border: 2px solid #3b82f6;
+  border: 2px solid #4f8cff;
   background: transparent;
   /* Box-shadow dims the outside screen area while keeping selected region clear */
   box-shadow:
     0 0 0 9999px rgba(15, 23, 42, 0.65),
-    0 0 12px rgba(59, 130, 246, 0.4) inset,
-    0 0 8px rgba(59, 130, 246, 0.3);
+    0 0 12px rgba(79, 140, 255, 0.4) inset,
+    0 0 8px rgba(79, 140, 255, 0.3);
   pointer-events: none;
   z-index: 1000;
 }
 
 .action-bar {
-  position: absolute;
-  bottom: -48px;
-  right: 0;
+  position: fixed;
   display: flex;
   gap: 6px;
-  background: rgba(15, 23, 42, 0.92);
+  background: rgba(15, 23, 42, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 6px 8px;
   border-radius: 10px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(8px);
-  pointer-events: auto; /* IMPORTANT: Enables button clicks inside the pointer-events: none parent */
+  pointer-events: auto;
+  z-index: 10001;
   opacity: 1;
-  transform: translateY(0);
-  transition:
-    opacity 0.2s,
-    transform 0.2s;
+  transition: opacity 0.2s ease;
 }
 
 .action-btn {
@@ -133,6 +129,8 @@ kbd {
   background: rgba(30, 41, 59, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
   transition: all 0.15s ease;
 }
 
@@ -141,21 +139,45 @@ kbd {
 }
 
 .action-btn:hover {
-  background: rgba(59, 130, 246, 0.15);
-  border-color: rgba(59, 130, 246, 0.4);
-  color: #3b82f6;
+  background: rgba(79, 140, 255, 0.15);
+  border-color: rgba(79, 140, 255, 0.4);
+  color: #4f8cff;
   transform: translateY(-1px);
 }
 
 .action-btn.gemini {
-  background: rgba(59, 130, 246, 0.85);
+  background: linear-gradient(180deg, rgba(96, 155, 255, 0.95) 0%, rgba(79, 140, 255, 0.9) 100%);
   border-color: transparent;
   color: #ffffff;
 }
 
 .action-btn.gemini:hover {
-  background: rgba(59, 130, 246, 1);
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+  background: linear-gradient(180deg, #6ea8ff 0%, #4f8cff 100%);
+  box-shadow: 0 0 12px rgba(79, 140, 255, 0.45);
+  color: #ffffff;
+}
+
+.action-btn.phone {
+  background: linear-gradient(180deg, rgba(52, 211, 153, 0.95) 0%, rgba(16, 185, 129, 0.9) 100%);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.action-btn.phone:hover {
+  background: linear-gradient(180deg, #4ade80 0%, #10b981 100%);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.45);
+  color: #ffffff;
+}
+
+.action-btn.ocr {
+  background: linear-gradient(180deg, rgba(251, 146, 60, 0.95) 0%, rgba(234, 88, 12, 0.9) 100%);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.action-btn.ocr:hover {
+  background: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
+  box-shadow: 0 0 12px rgba(251, 146, 60, 0.45);
   color: #ffffff;
 }
 

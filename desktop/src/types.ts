@@ -22,7 +22,14 @@ export interface AppSettings {
   aiBaseUrl: string;
   /** Interface language. 'system' follows the OS locale (Turkish → tr, else en). */
   language: 'system' | 'en' | 'tr';
+  /** Last floating panel position (screen coordinates). */
+  panelX?: number;
+  panelY?: number;
+  /** When true the panel stays expanded after the mouse leaves. */
+  panelPinned?: boolean;
 }
+
+export type PanelMode = 'compact' | 'presented';
 
 export interface Rect {
   x: number;
@@ -49,7 +56,14 @@ export interface SelectionPayload {
 }
 
 export interface BridgeAPI {
-  ready: () => Promise<AppSettings & { selectionActive: boolean; i18n: Record<string, string> }>;
+  ready: () => Promise<
+    AppSettings & {
+      selectionActive: boolean;
+      panelMode: PanelMode;
+      pillMaxWidth: number;
+      i18n: Record<string, string>;
+    }
+  >;
   saveSettings: (settings: Partial<AppSettings>) => Promise<{ ok: boolean }>;
   generateQr: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
   captureNow: () => Promise<{ ok: boolean; mode?: string }>;
@@ -64,6 +78,7 @@ export interface BridgeAPI {
   onOverlayMessage: (callback: (message: string) => void) => void;
   confirmSelectionGemini: () => Promise<{ ok: boolean }>;
   confirmSelectionPhone: () => Promise<{ ok: boolean }>;
+  confirmSelectionOcr: () => Promise<{ ok: boolean }>;
   getStorageUsage: () => Promise<{
     ok: boolean;
     usedBytes?: number;
@@ -74,6 +89,20 @@ export interface BridgeAPI {
   purgeStorage: () => Promise<{ ok: boolean; deletedCount?: number; error?: string }>;
   setupRls: () => Promise<{ ok: boolean; sql?: string; error?: string }>;
   sendClipboard: () => Promise<{ ok: boolean; error?: string }>;
+  panelToggle: () => Promise<{ ok: boolean; mode: PanelMode }>;
+  panelInteractStart: () => Promise<{ ok: boolean }>;
+  panelDragBy: (dx: number, dy: number) => Promise<{ ok: boolean }>;
+  panelDismiss: () => Promise<{ ok: boolean; mode: PanelMode }>;
+  savePanelPinned: (pinned: boolean) => Promise<{ ok: boolean }>;
+  panelResizeCompact: (size: { width: number; height: number }) => Promise<{
+    ok: boolean;
+    width?: number;
+    height?: number;
+  }>;
+  onPanelMode: (callback: (mode: PanelMode) => void) => void;
+  onHudCapturing: (callback: (active: boolean) => void) => void;
+  onPillDragState: (callback: (dragging: boolean) => void) => void;
+  onPillResized: (callback: (size: { width: number; height: number }) => void) => void;
 }
 
 declare global {

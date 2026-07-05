@@ -18,10 +18,21 @@ const bridge: BridgeAPI = {
     ipcRenderer.on('overlay-message', (_, message) => callback(message)),
   confirmSelectionGemini: () => ipcRenderer.invoke('confirm-selection-gemini'),
   confirmSelectionPhone: () => ipcRenderer.invoke('confirm-selection-phone'),
+  confirmSelectionOcr: () => ipcRenderer.invoke('confirm-selection-ocr'),
   getStorageUsage: () => ipcRenderer.invoke('get-storage-usage'),
   purgeStorage: () => ipcRenderer.invoke('purge-storage'),
   setupRls: () => ipcRenderer.invoke('setup-rls'),
   sendClipboard: () => ipcRenderer.invoke('send-clipboard'),
+  panelToggle: () => ipcRenderer.invoke('panel-toggle'),
+  panelInteractStart: () => ipcRenderer.invoke('panel-interact-start'),
+  panelDragBy: (dx, dy) => ipcRenderer.invoke('panel-drag-by', dx, dy),
+  panelDismiss: () => ipcRenderer.invoke('panel-dismiss'),
+  savePanelPinned: (pinned) => ipcRenderer.invoke('panel-save-pinned', pinned),
+  panelResizeCompact: (size) => ipcRenderer.invoke('panel-resize-compact', size),
+  onPanelMode: (callback) => ipcRenderer.on('panel-mode', (_, mode) => callback(mode)),
+  onHudCapturing: (callback) => ipcRenderer.on('hud-capturing', (_, active) => callback(active)),
+  onPillDragState: (callback) => ipcRenderer.on('pill-drag-state', (_, dragging) => callback(dragging)),
+  onPillResized: (callback) => ipcRenderer.on('pill-resized', (_, size) => callback(size)),
 };
 
 contextBridge.exposeInMainWorld('bridge', bridge);

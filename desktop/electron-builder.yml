@@ -9,21 +9,27 @@ files:
   - src/**/*.html
   - src/**/*.css
   - index.html
+  - pill.html
   - package.json
 asarUnpack:
   - "**/node_modules/screenshot-desktop/**/*"
 extraResources:
   - from: src/key_listener.exe
     to: src/key_listener.exe
-  - from: src/photo_dropper.exe
-    to: src/photo_dropper.exe
+  - from: src/pill_hud.exe
+    to: src/pill_hud.exe
+  - from: src/round_window.exe
+    to: src/round_window.exe
   - from: src/ocr_helper.exe
     to: src/ocr_helper.exe
-# win:
-#   target:
-#     - nsis
-#     - portable
-#   icon: build/icon.ico
+  - from: src/ocr.ps1
+    to: src/ocr.ps1
+  - from: src/photo_dropper.exe
+    to: src/photo_dropper.exe
+win:
+  target:
+    - nsis
+    - portable
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

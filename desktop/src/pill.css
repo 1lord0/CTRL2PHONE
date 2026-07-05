@@ -1,0 +1,175 @@
+:root {
+  --pill-bg: #121826;
+  --pill-bg-top: #1a2234;
+  --pill-bg-hover: #1c2538;
+  --pill-bg-capture: #182238;
+  --pill-border-color: rgba(148, 187, 255, 0.28);
+  --pill-border-active: rgba(79, 140, 255, 0.5);
+  --pill-highlight: rgba(255, 255, 255, 0.09);
+  --pill-glow: rgba(79, 140, 255, 0.22);
+  --pill-text: #e5eefc;
+  --pill-muted: #89a1c7;
+  --pill-radius: 22px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+.pill-root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--pill-bg) !important;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.pill-shell {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--pill-radius);
+  background: linear-gradient(180deg, var(--pill-bg-top) 0%, var(--pill-bg) 100%);
+  box-shadow:
+    inset 0 0 0 1px var(--pill-border-color),
+    inset 0 1px 0 var(--pill-highlight),
+    0 10px 28px rgba(0, 0, 0, 0.38),
+    0 0 0 1px rgba(0, 0, 0, 0.12);
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.pill-shell:hover {
+  background: linear-gradient(180deg, #1e283c 0%, var(--pill-bg-hover) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 187, 255, 0.36),
+    inset 0 1px 0 var(--pill-highlight),
+    0 12px 32px rgba(0, 0, 0, 0.42);
+}
+
+.pill-shell:has(.pill-hud.is-active) {
+  box-shadow:
+    inset 0 0 0 1px var(--pill-border-active),
+    inset 0 1px 0 var(--pill-highlight),
+    0 0 0 1px var(--pill-glow);
+}
+
+.pill-shell:has(.pill-hud.is-capturing) {
+  background: linear-gradient(180deg, #1a2844 0%, var(--pill-bg-capture) 100%);
+  animation: pillCapturePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pillCapturePulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgba(79, 140, 255, 0.45),
+      inset 0 1px 0 var(--pill-highlight),
+      0 0 12px rgba(79, 140, 255, 0.2);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgba(79, 140, 255, 0.7),
+      inset 0 1px 0 var(--pill-highlight),
+      0 0 20px rgba(79, 140, 255, 0.35);
+  }
+}
+
+.pill-shell,
+.pill-hud,
+.pill-open,
+.pill-status {
+  -webkit-app-region: no-drag;
+}
+
+.pill-hud {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 max(18px, calc(var(--pill-radius) * 0.35)) 0 max(14px, calc(var(--pill-radius) * 0.5));
+  overflow: hidden;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.pill-hud.is-dragging {
+  cursor: grabbing;
+}
+
+.pill-open {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.06) 100%);
+  color: #dbeafe;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pill-open:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(148, 187, 255, 0.35);
+  transform: scale(1.04);
+}
+
+.pill-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--pill-muted);
+  text-align: left;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: break-word;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.pill-shell:has(.pill-hud.is-active) .pill-status,
+.pill-shell:has(.pill-hud.is-capturing) .pill-status {
+  color: var(--pill-text);
+}
+
+.pill-status.is-overflow {
+  display: block;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: unset;
+  white-space: nowrap;
+  animation: pillMarquee 7s ease-in-out infinite alternate;
+}
+
+@keyframes pillMarquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--marquee-end, -48px));
+  }
+}
+
+.pill-status-measure {
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}

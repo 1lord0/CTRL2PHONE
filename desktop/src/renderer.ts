@@ -12,7 +12,11 @@ const aiBaseUrlInput = document.getElementById('aiBaseUrl') as HTMLInputElement;
 const aiBaseUrlRow = document.getElementById('aiBaseUrlRow') as HTMLElement;
 const uiLanguageInput = document.getElementById('uiLanguage') as HTMLSelectElement;
 const statusNode = document.getElementById('status') as HTMLElement;
+const statusDot = document.getElementById('statusDot') as HTMLElement;
 const responseNode = document.getElementById('response') as HTMLElement;
+const spotlightPanel = document.getElementById('spotlightPanel') as HTMLElement;
+const dismissPanelBtn = document.getElementById('dismissPanel') as HTMLButtonElement;
+const pinPanelBtn = document.getElementById('pinPanel') as HTMLButtonElement;
 const qrCodeImage = document.getElementById('qrCodeImage') as HTMLImageElement;
 
 const storageContainer = document.getElementById('storageContainer') as HTMLElement;
@@ -57,10 +61,89 @@ function applyI18n(dict: Record<string, string>): void {
 // them to their localized placeholder on a language switch — these flags track that.
 let statusDirty = false;
 let responseDirty = false;
+let panelPinned = false;
+
+function setPanelVisualMode(mode: 'compact' | 'presented'): void {
+  document.body.dataset.panelMode = mode;
+  if (spotlightPanel) {
+    spotlightPanel.dataset.mode = mode === 'presented' ? 'presented' : 'compact';
+  }
+}
+
+function updatePinUi(): void {
+  if (!pinPanelBtn) return;
+  pinPanelBtn.setAttribute('aria-pressed', panelPinned ? 'true' : 'false');
+  pinPanelBtn.title = panelPinned
+    ? t('label.unpinPanel', 'Sabitlemeyi kaldır')
+    : t('label.pinPanel', 'Paneli sabitle');
+  spotlightPanel?.classList.toggle('is-pinned', panelPinned);
+}
+
+function bindChromeButton(
+  btn: HTMLButtonElement | null,
+  handler: () => void | Promise<void>
+): void {
+  if (!btn) return;
+  let lastAt = 0;
+  const run = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const now = Date.now();
+    if (now - lastAt < 250) return;
+    lastAt = now;
+    void handler();
+  };
+  btn.addEventListener('pointerup', run);
+  btn.addEventListener('click', run);
+}
+
+function initSpotlightPanel(): void {
+  bindChromeButton(dismissPanelBtn, async () => {
+    await window.bridge.panelDismiss();
+  });
+
+  bindChromeButton(pinPanelBtn, async () => {
+    panelPinned = !panelPinned;
+    updatePinUi();
+    await window.bridge.savePanelPinned(panelPinned);
+  });
+
+  document.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape' && !panelPinned) {
+      e.preventDefault();
+      await window.bridge.panelDismiss();
+    }
+  });
+
+  window.bridge.onPanelMode((mode) => {
+    setPanelVisualMode(mode);
+  });
+}
+
+function updateStatusDot(text: string): void {
+  if (!statusDot) return;
+  const lower = text.toLowerCase();
+  const busy =
+    text.includes('...') ||
+    lower.includes('ing') ||
+    lower.includes('yor') ||
+    lower.includes('leniyor') ||
+    lower.includes('anıyor');
+  const error =
+    lower.includes('hata') ||
+    lower.includes('error') ||
+    lower.includes('başarısız') ||
+    lower.includes('failed');
+  statusDot.className = 'status-dot';
+  if (error) statusDot.classList.add('is-error');
+  else if (busy) statusDot.classList.add('is-busy');
+  else statusDot.classList.add('is-ready');
+}
 
 function showStatus(text: string): void {
   statusDirty = true;
   statusNode.textContent = text;
+  updateStatusDot(text);
 }
 
 function showResponse(text: string): void {
@@ -73,13 +156,13 @@ async function updateQrCode(): Promise<void> {
     const result = await window.bridge.generateQr();
     if (result?.ok && result.dataUrl) {
       qrCodeImage.src = result.dataUrl;
-      qrCodeImage.style.display = 'block';
+      qrCodeImage.classList.remove('hidden');
     } else {
-      qrCodeImage.style.display = 'none';
+      qrCodeImage.classList.add('hidden');
     }
   } catch (e) {
     console.error('QR Kod yükleme hatası:', e);
-    qrCodeImage.style.display = 'none';
+    qrCodeImage.classList.add('hidden');
   }
 }
 
@@ -97,22 +180,17 @@ async function updateStorageUsage(): Promise<void> {
 
       storageText.textContent = `${usedMb.toFixed(1)} MB / ${limitMb.toFixed(0)} MB (${pct.toFixed(1)}%)`;
       storageBar.style.width = `${Math.min(pct, 100)}%`;
+      storageBar.classList.remove('is-warn', 'is-danger');
+      if (pct > 90) storageBar.classList.add('is-danger');
+      else if (pct > 75) storageBar.classList.add('is-warn');
 
-      if (pct > 90) {
-        storageBar.style.backgroundColor = '#ef4444'; // Red
-      } else if (pct > 75) {
-        storageBar.style.backgroundColor = '#f97316'; // Orange
-      } else {
-        storageBar.style.backgroundColor = '#3b82f6'; // Blue
-      }
-
-      storageContainer.style.display = 'block';
+      storageContainer.classList.remove('hidden');
     } else {
-      storageContainer.style.display = 'none';
+      storageContainer.classList.add('hidden');
     }
   } catch (e) {
     console.error('Storage query error:', e);
-    storageContainer.style.display = 'none';
+    storageContainer.classList.add('hidden');
   }
 }
 
@@ -146,16 +224,21 @@ function loadSettings(state: any): void {
   if (uiLanguageInput) {
     uiLanguageInput.value = state.language || 'system';
   }
+  panelPinned = Boolean(state.panelPinned);
+  updatePinUi();
+  setPanelVisualMode('presented');
   updateAiProviderUi();
   // Only (re)apply the localized placeholders while no live runtime message is shown,
   // so switching language never wipes an AI reply / signed URL / OCR text.
   if (!statusDirty) {
-    statusNode.textContent = state.selectionActive
+    const readyText = state.selectionActive
       ? t('status.selectionActive', 'Seçim modu açık')
       : t('status.ready', 'Hazır');
+    statusNode.textContent = readyText;
+    updateStatusDot(readyText);
   }
   if (!responseDirty) {
-    responseNode.textContent = t('response.placeholder', 'Yapay zekâ yanıtı burada görünecek.');
+    responseNode.textContent = t('response.placeholder', 'Yapay zeka yanıtı burada görünecek.');
   }
   updateQrCode();
   updateStorageUsage();
@@ -179,6 +262,7 @@ uiLanguageInput?.addEventListener('change', async () => {
   loadSettings(state);
 });
 
+initSpotlightPanel();
 window.bridge.ready().then(loadSettings);
 
 window.bridge.onStatus((message) => {
@@ -304,3 +388,5 @@ document.getElementById('sendClipboard')?.addEventListener('click', async () => 
     showStatus(t('status.genericError', 'Hata: ') + e.message);
   }
 });
+
+export {};

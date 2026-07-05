@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'gallery_paging.dart';
+import 'photo_sync_state.dart';
 
 // ============================================================
 // Supabase Service: Dinamik Bağlantı + Storage Listeleme
@@ -67,10 +68,93 @@ class SupabaseService {
   SupabaseClient? get _client => _clientInstance;
   String get bucketName => _bucketName ?? 'SCREENSHOTS';
 
+  Future<Photo> _buildPhotoFromFile(FileObject file) async {
+    String url;
+    try {
+      url = await _client!.storage
+          .from(bucketName)
+          .createSignedUrl(file.name, 60 * 60 * 6);
+    } catch (_) {
+      url = _client!.storage.from(bucketName).getPublicUrl(file.name);
+    }
+    return Photo(
+      id: file.id ?? file.name,
+      storagePath: '$bucketName/${file.name}',
+      originalName: file.name,
+      fileSize: file.metadata?['size'] as int?,
+      mimeType: file.metadata?['mimetype'] as String?,
+      uploadedAt: DateTime.parse(file.createdAt ?? DateTime.now().toIso8601String()),
+      deviceId: 'Desktop_App',
+      url: url,
+    );
+  }
+
+  /// Lists bucket root and returns only photos not yet synced (no repeat signing).
+  Future<List<Photo>> getNewPhotosOnly({
+    required Set<String> knownKeys,
+    int limit = 100,
+  }) async {
+    if (!isInitialized) {
+      throw Exception('Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
+    }
+
+    final List<FileObject> objects = await _client!.storage.from(bucketName).list(
+          searchOptions: SearchOptions(
+            limit: limit,
+            offset: 0,
+            sortBy: const SortBy(column: 'created_at', order: 'desc'),
+          ),
+        );
+
+    final files = objects.where((obj) => isVisiblePhotoName(obj.name)).toList();
+    final photos = <Photo>[];
+
+    for (final file in files) {
+      final key = PhotoSyncState.makeKey(file);
+      if (knownKeys.contains(key)) continue;
+      photos.add(await _buildPhotoFromFile(file));
+    }
+
+    return photos;
+  }
+
+  /// Realtime INSERT: resolve a single new desktop upload without listing the bucket.
+  Future<Photo?> fetchPhotoByStorageName(
+    String storageName, {
+    required Set<String> knownKeys,
+  }) async {
+    if (!isInitialized) return null;
+    final base = storageName.split('/').last;
+    if (!isVisiblePhotoName(base)) return null;
+
+    final pathKey = PhotoSyncState.objectKey(storageName);
+    if (knownKeys.contains(pathKey)) return null;
+
+    String url;
+    try {
+      url = await _client!.storage
+          .from(bucketName)
+          .createSignedUrl(storageName, 60 * 60 * 6);
+    } catch (_) {
+      url = _client!.storage.from(bucketName).getPublicUrl(storageName);
+    }
+
+    return Photo(
+      id: storageName,
+      storagePath: '$bucketName/$storageName',
+      originalName: base,
+      uploadedAt: DateTime.now(),
+      deviceId: 'Desktop_App',
+      url: url,
+    );
+  }
+
   /// Supabase Storage bucket'ından ekran görüntülerini listeler.
   Future<PhotoPage> getPhotos({
     int limit = 50,
     int offset = 0,
+    Set<String> knownKeys = const {},
+    bool onlySignNew = false,
   }) async {
     if (!isInitialized) {
       throw Exception('Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
@@ -94,29 +178,14 @@ class SupabaseService {
       // Filtreleme: Klasörler veya gizli sistem dosyalarını temizle (to_pc klasörü dahil)
       final files = objects.where((obj) => isVisiblePhotoName(obj.name)).toList();
 
-      // Kısa ömürlü signed URL üret: bucket private olsa da görseller yüklenir
-      // ve kalıcı herkese-açık bir bağlantı bırakılmaz. İmzalama başarısızsa
-      // (bucket hâlâ public + select politikası yok) public URL'e düşeriz.
-      final photos = await Future.wait(files.map((file) async {
-        String url;
-        try {
-          url = await _client!.storage
-              .from(bucketName)
-              .createSignedUrl(file.name, 60 * 60 * 6); // 6 saat geçerli
-        } catch (_) {
-          url = _client!.storage.from(bucketName).getPublicUrl(file.name);
+      final photos = <Photo>[];
+      for (final file in files) {
+        if (onlySignNew) {
+          final key = PhotoSyncState.makeKey(file);
+          if (knownKeys.contains(key)) continue;
         }
-        return Photo(
-          id: file.id ?? file.name,
-          storagePath: '$bucketName/${file.name}',
-          originalName: file.name,
-          fileSize: file.metadata?['size'] as int?,
-          mimeType: file.metadata?['mimetype'] as String?,
-          uploadedAt: DateTime.parse(file.createdAt ?? DateTime.now().toIso8601String()),
-          deviceId: 'Desktop_App',
-          url: url,
-        );
-      }));
+        photos.add(await _buildPhotoFromFile(file));
+      }
 
       return PhotoPage(
         photos: photos,
@@ -379,6 +448,7 @@ class Photo {
       mimeType: json['mime_type'] as String?,
       uploadedAt: DateTime.parse(json['uploaded_at'] as String),
       deviceId: json['device_id'] as String?,
+      url: json['url'] as String? ?? '',
     );
   }
 
@@ -390,5 +460,6 @@ class Photo {
         'mime_type': mimeType,
         'uploaded_at': uploadedAt.toIso8601String(),
         'device_id': deviceId,
+        'url': url,
       };
 }

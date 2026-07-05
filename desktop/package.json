@@ -8,6 +8,7 @@
     "start": "npm run build && electron .",
     "dev": "tsc --watch",
     "build": "tsc",
+    "build:native": "cd src && csc /nologo /reference:System.Windows.Forms.dll /target:exe /out:key_listener.exe key_listener.cs && csc /nologo /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /target:winexe /out:pill_hud.exe pill_hud.cs && csc /nologo /target:exe /out:round_window.exe round_window.cs",
     "package": "npm run build && electron-builder",
     "lint": "eslint src/",
     "format": "prettier --write src/",

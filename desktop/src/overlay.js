@@ -4,6 +4,7 @@ const overlayText = document.getElementById('overlayText');
 const actionBar = document.getElementById('actionBar');
 const btnGemini = document.getElementById('btnGemini');
 const btnPhone = document.getElementById('btnPhone');
+const btnOcr = document.getElementById('btnOcr');
 const btnCancel = document.getElementById('btnCancel');
 // ── Annotation layer ─────────────────────────────────────────────
 const annotationCanvas = document.getElementById('annotationCanvas');
@@ -88,6 +89,17 @@ function setTool(tool) {
 function showToolbarIfReady() {
     toolbarEl.classList.toggle('hidden', !(currentRect && active));
 }
+function positionActionBar(rect) {
+    const gap = 8;
+    const barHeight = actionBar.offsetHeight || 44;
+    let top = rect.y + rect.height + gap;
+    if (top + barHeight > window.innerHeight - 8) {
+        top = Math.max(8, rect.y - barHeight - gap);
+    }
+    const left = Math.max(8, rect.x + rect.width - actionBar.offsetWidth);
+    actionBar.style.top = `${top}px`;
+    actionBar.style.left = `${left}px`;
+}
 // ── Selection rendering (unchanged behavior) ─────────────────────
 function renderSelection(rect) {
     if (!rect) {
@@ -100,6 +112,9 @@ function renderSelection(rect) {
     selectionBox.style.top = `${rect.y}px`;
     selectionBox.style.width = `${rect.width}px`;
     selectionBox.style.height = `${rect.height}px`;
+    if (!actionBar.classList.contains('hidden')) {
+        positionActionBar(rect);
+    }
 }
 function updateRect(endPoint) {
     if (!startPoint) {
@@ -193,6 +208,7 @@ window.addEventListener('mouseup', async (event) => {
         await window.bridge.setSelection({ type: 'update', rect: currentRect });
         overlayText.textContent = 'Seçim hazır. Çiz (kalem/kutu/karart) ya da gönder:';
         actionBar.classList.remove('hidden');
+        positionActionBar(currentRect);
         showToolbarIfReady();
     }
     else {
@@ -239,18 +255,53 @@ btnClear.addEventListener('click', (e) => {
     redraw();
     syncAnnotatedFlag();
 });
-// ── Action buttons (unchanged) ───────────────────────────────────
-btnGemini.addEventListener('click', (e) => {
-    e.stopPropagation();
+function bindOverlayAction(btn, handler) {
+    let lastAt = 0;
+    const run = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const now = Date.now();
+        if (now - lastAt < 250)
+            return;
+        lastAt = now;
+        handler();
+    };
+    btn.addEventListener('pointerup', run);
+    btn.addEventListener('click', run);
+}
+// ── Action buttons ───────────────────────────────────────────────
+bindOverlayAction(btnGemini, () => {
     window.bridge.confirmSelectionGemini();
 });
-btnPhone.addEventListener('click', (e) => {
-    e.stopPropagation();
+bindOverlayAction(btnPhone, () => {
     window.bridge.confirmSelectionPhone();
 });
-btnCancel.addEventListener('click', (e) => {
-    e.stopPropagation();
+bindOverlayAction(btnOcr, () => {
+    window.bridge.confirmSelectionOcr();
+});
+bindOverlayAction(btnCancel, () => {
     window.bridge.cancelSelection();
+});
+// Klavye kısayolları — key_listener yedek yolu (overlay odakta iken).
+window.addEventListener('keydown', (e) => {
+    if (!active || !currentRect)
+        return;
+    if (e.key === 'x' || e.key === 'X' || e.key === 'Enter') {
+        e.preventDefault();
+        window.bridge.confirmSelectionGemini();
+    }
+    else if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        window.bridge.confirmSelectionPhone();
+    }
+    else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        window.bridge.confirmSelectionOcr();
+    }
+    else if (e.key === 'Escape') {
+        e.preventDefault();
+        window.bridge.cancelSelection();
+    }
 });
 // ── Composite the selection + annotations into a PNG for main ────
 window.__ctrl2phoneCompose = () => {
@@ -319,6 +370,7 @@ window.bridge.onOverlayState((state) => {
         renderSelection(currentRect);
         document.body.classList.add('selecting');
         actionBar.classList.remove('hidden');
+        positionActionBar(currentRect);
         showToolbarIfReady();
     }
     else if (!dragging) {
