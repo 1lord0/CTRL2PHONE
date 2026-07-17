@@ -54,12 +54,12 @@ import {
   createClipboardSyncController,
   parseMobileClipboardRow,
 } from './main/clipboardSyncController';
+import { createElectronGeminiWindowController } from './main/geminiWindowController';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
-let geminiWindow: BrowserWindow | null = null;
 let selectionActive = false;
 let selectionStarting = false;
 let selectionHasAnnotations = false;
@@ -135,6 +135,7 @@ const supabaseRuntime = createSupabaseRuntime<SupabaseClient>(settings, {
 });
 const phoneSyncState = createElectronPhoneSyncState();
 const notificationController = createElectronNotificationController(() => shutdownStarted);
+const geminiWindowController = createElectronGeminiWindowController(() => shutdownStarted);
 const clipboardSyncController = createClipboardSyncController({
   readClipboard: () => clipboard.readText(),
   writeClipboard: value => clipboard.writeText(value),
@@ -193,8 +194,6 @@ let savedPillBounds: Electron.Rectangle | null = null;
 let pillHudElevated = false;
 let mainWindowPage: 'pill' | 'panel' | 'none' = 'pill';
 
-
-const geminiUrl = 'https://gemini.google.com/app';
 
 let phoneSyncInterval: NodeJS.Timeout | null = null;
 let phoneSyncChannel: RealtimeChannel | null = null;
@@ -1159,92 +1158,6 @@ async function waitForOverlayReady(lifecycle: NonNullable<typeof overlayLifecycl
   }
 }
 
-function createGeminiWindow(): BrowserWindow {
-  if (geminiWindow && !geminiWindow.isDestroyed()) {
-    return geminiWindow;
-  }
-
-  geminiWindow = new BrowserWindow({
-    width: 1280,
-    height: 900,
-    show: false,
-    backgroundColor: '#0b0f14',
-    title: 'Gemini Web',
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      partition: 'persist:gemini',
-    },
-  });
-
-  geminiWindow.on('close', (event) => {
-    if (!shutdownStarted) {
-      event.preventDefault();
-      geminiWindow?.hide();
-    }
-  });
-
-  geminiWindow.on('closed', () => {
-    geminiWindow = null;
-  });
-
-  return geminiWindow;
-}
-
-async function ensureGeminiWindowLoaded(): Promise<BrowserWindow> {
-  const win = createGeminiWindow();
-  const url = win.webContents.getURL();
-  if (!url || url === 'about:blank') {
-    await win.loadURL(geminiUrl);
-  }
-  return win;
-}
-
-async function openGeminiWindow(): Promise<BrowserWindow> {
-  const win = await ensureGeminiWindowLoaded();
-  win.show();
-  win.focus();
-  return win;
-}
-
-async function focusGeminiComposer(
-  windowInstance: BrowserWindow,
-  promptText: string
-): Promise<boolean> {
-  const safePrompt = JSON.stringify(promptText);
-  const focused = await windowInstance.webContents.executeJavaScript(`
-    (() => {
-      const selectors = ['div[contenteditable="true"]', 'div[role="textbox"]', 'textarea', 'input[type="text"]'];
-      const element = selectors.map((selector) => document.querySelector(selector)).find(Boolean);
-      if (element) {
-        element.focus();
-        element.click();
-        
-        const prompt = ${safePrompt};
-        if (prompt) {
-          if (element.tagName === 'DIV' || element.getAttribute('contenteditable') === 'true') {
-            element.innerText = prompt;
-          } else {
-            element.value = prompt;
-          }
-          // Dispatch events so the React engine registers the change and enables Send button
-          element.dispatchEvent(new Event('input', { bubbles: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        return true;
-      }
-      return false;
-    })();
-  `);
-
-  return Boolean(focused);
-}
-
-function sendPasteShortcut(windowInstance: BrowserWindow): void {
-  windowInstance.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['ctrl'] });
-  windowInstance.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: ['ctrl'] });
-}
-
 // NOTE: status/response strings pushed from the main process (capture, AI, OCR,
 // Supabase, phone-sync flows) are currently Turkish-only. The renderer shows them
 // verbatim, so under an English UI these runtime lines stay Turkish. Static labels
@@ -2005,11 +1918,14 @@ async function captureAndSend(sessionId: number): Promise<void> {
       return;
     }
     
-    const windowInstance = await openGeminiWindow();
+    const windowInstance = await geminiWindowController.open();
     if (!isSelectionSessionCurrent(sessionId) && actionSessionId !== selectionActionInFlightSessionId) return;
     
-    const composerFocused = await focusGeminiComposer(windowInstance, settings.prompt);
-    sendPasteShortcut(windowInstance);
+    const composerFocused = await geminiWindowController.focusComposer(
+      windowInstance,
+      settings.prompt
+    );
+    geminiWindowController.sendPasteShortcut(windowInstance);
     
     setResponse(
       `Seçilen alan Gemini web'e kopyalandı. ${composerFocused ? 'Yapıştırma denendi.' : 'Yapıştırma kısayolu gönderildi.'}`
@@ -2671,13 +2587,13 @@ ipcMain.handle('setup-rls', async () => {
 
 ipcMain.handle('open-gemini', async () => {
   if (shutdownStarted) return { ok: false };
-  const windowInstance = await openGeminiWindow();
+  const windowInstance = await geminiWindowController.open();
   return { ok: Boolean(windowInstance) };
 });
 
 ipcMain.handle('focus-gemini', async () => {
   if (shutdownStarted) return { ok: false };
-  const windowInstance = await openGeminiWindow();
+  const windowInstance = await geminiWindowController.open();
   return { ok: Boolean(windowInstance) };
 });
 
@@ -2975,7 +2891,9 @@ if (!gotTheLock) {
 
     setTimeout(() => {
       if (!shutdownStarted) {
-        ensureGeminiWindowLoaded().catch((e) => console.error('Gemini ön-yükleme hatası:', e));
+        geminiWindowController
+          .ensureLoaded()
+          .catch((e) => console.error('Gemini ön-yükleme hatası:', e));
       }
     }, 5000);
 
