@@ -50,6 +50,10 @@ import {
   createElectronNotificationController,
   type NotificationType,
 } from './main/notificationController';
+import {
+  createClipboardSyncController,
+  parseMobileClipboardRow,
+} from './main/clipboardSyncController';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
@@ -114,7 +118,6 @@ let mainWindowPageLoad: {
   promise: Promise<boolean>;
 } | null = null;
 let mainWindowPageLoadGeneration = 0;
-let clipboardCheckInFlightGeneration: number | null = null;
 let _pillHudFallbackInFlight: Promise<void> | null = null;
 
 const settings = createDefaultSettings();
@@ -132,6 +135,42 @@ const supabaseRuntime = createSupabaseRuntime<SupabaseClient>(settings, {
 });
 const phoneSyncState = createElectronPhoneSyncState();
 const notificationController = createElectronNotificationController(() => shutdownStarted);
+const clipboardSyncController = createClipboardSyncController({
+  readClipboard: () => clipboard.readText(),
+  writeClipboard: value => clipboard.writeText(value),
+  isClipboardGuarded: () => isLocalClipboardGuarded(),
+  getContext: () => getSupabaseContext(),
+  isContextCurrent: context => isSupabaseContextCurrent(context),
+  insertDesktopText: async (context, text) => {
+    const { error } = await context.client.from('clipboard_sync').insert({
+      content: text,
+      source: 'desktop',
+    });
+    return error?.message ?? null;
+  },
+  fetchOldestMobileText: async context => {
+    const { data, error } = await context.client
+      .from('clipboard_sync')
+      .select('*')
+      .eq('source', 'mobile')
+      .order('created_at', { ascending: true })
+      .limit(1);
+    return {
+      row: parseMobileClipboardRow(data?.[0]),
+      error: error?.message ?? null,
+    };
+  },
+  deleteMobileText: async (context, id) => {
+    const { error } = await context.client.from('clipboard_sync').delete().eq('id', id);
+    return error?.message ?? null;
+  },
+  setStatus,
+  setResponse,
+  showNotification: (title, body) => showCustomNotification(title, body, 'sync'),
+  log: message => console.log(message),
+  warn: (message, detail) => console.warn(message, detail ?? ''),
+  error: (message, error) => console.error(message, error),
+});
 
 const PILL_MIN = { width: 220, height: 44 };
 const PILL_MAX = { width: 720, height: 80 };
@@ -161,8 +200,6 @@ let phoneSyncInterval: NodeJS.Timeout | null = null;
 let phoneSyncChannel: RealtimeChannel | null = null;
 const PHONE_SYNC_LIST_LIMIT = 100;
 const PHONE_SYNC_BATCH_LIMIT = 10;
-let clipboardSyncInterval: NodeJS.Timeout | null = null;
-let lastProcessedClipboardId: string | null = null;
 let ocrInFlight = false;
 
 function isWindowUsable(window: BrowserWindow | null | undefined): window is BrowserWindow {
@@ -201,10 +238,7 @@ function stopPhoneSyncPolling(): void {
 }
 
 function stopClipboardPolling(): void {
-  if (clipboardSyncInterval) {
-    clearInterval(clipboardSyncInterval);
-    clipboardSyncInterval = null;
-  }
+  clipboardSyncController.stopPolling();
 }
 
 function beginShutdown(): boolean {
@@ -235,107 +269,11 @@ function quitApplication(): void {
 }
 
 async function sendClipboardToPhone(): Promise<{ ok: boolean; error?: string }> {
-  const text = clipboard.readText();
-  if (!text || !text.trim()) {
-    setStatus('Panoda kopyalanmış metin bulunamadı');
-    return { ok: false, error: 'Panoda metin yok' };
-  }
-  const context = getSupabaseContext();
-  if (!context) {
-    setStatus('Supabase ayarları eksik!');
-    return { ok: false, error: 'Supabase ayarları eksik' };
-  }
-  const { client } = context;
-  try {
-    const { error } = await client.from('clipboard_sync').insert({
-      content: text.trim(),
-      source: 'desktop',
-    });
-
-    if (error) throw new Error(error.message);
-
-    if (!isSupabaseContextCurrent(context)) {
-      return { ok: false, error: 'Supabase ayarları gönderim sırasında değişti' };
-    }
-
-    const preview = text.trim().length > 60 ? text.trim().substring(0, 60) + '...' : text.trim();
-    showCustomNotification('Metin Telefona Gönderildi', preview, 'sync');
-
-    setStatus('Pano metni telefona gönderildi');
-    setResponse(`Gönderilen metin: ${text.trim().substring(0, 200)}`);
-    return { ok: true };
-  } catch (err: any) {
-    console.error('Clipboard send error:', err);
-    setStatus('Metin gönderme hatası: ' + err.message);
-    return { ok: false, error: err.message };
-  }
-}
-
-async function checkClipboardFromMobile(): Promise<void> {
-  // Don't stomp a fresh local OCR / RLS copy with a stale mobile row.
-  if (isLocalClipboardGuarded()) return;
-  const context = getSupabaseContext();
-  if (!context) return;
-  if (clipboardCheckInFlightGeneration === context.generation) return;
-  const { client } = context;
-  clipboardCheckInFlightGeneration = context.generation;
-  try {
-    const { data, error } = await client
-      .from('clipboard_sync')
-      .select('*')
-      .eq('source', 'mobile')
-      .order('created_at', { ascending: true })
-      .limit(1);
-
-    if (error) {
-      console.warn('Clipboard poll error:', error.message);
-      return;
-    }
-
-    if (!isSupabaseContextCurrent(context) || isLocalClipboardGuarded()) {
-      return;
-    }
-
-    if (data && data.length > 0) {
-      const row = data[0];
-      if (row.id !== lastProcessedClipboardId) {
-        lastProcessedClipboardId = row.id;
-        const content = row.content;
-        if (content) {
-          clipboard.writeText(content);
-          const preview = content.length > 60 ? content.substring(0, 60) + '...' : content;
-          showCustomNotification('Telefondan Metin Alındı', preview, 'sync');
-          setStatus('Telefondan metin alındı');
-          setResponse(`Alınan metin: ${content.substring(0, 200)}`);
-        }
-      }
-
-      // Always try to delete the record from database to keep it clean
-      const { error: deleteError } = await client.from('clipboard_sync').delete().eq('id', row.id);
-      if (deleteError) {
-        console.warn('Clipboard row cleanup failed:', deleteError.message);
-      }
-    }
-  } catch (err) {
-    console.error('checkClipboardFromMobile error:', err);
-  } finally {
-    if (clipboardCheckInFlightGeneration === context.generation) {
-      clipboardCheckInFlightGeneration = null;
-    }
-  }
+  return await clipboardSyncController.sendToPhone();
 }
 
 function setupClipboardPolling(): void {
-  stopClipboardPolling();
-
-  const context = getSupabaseContext();
-  if (!context) {
-    console.log('Clipboard polling: waiting for Supabase settings');
-    return;
-  }
-
-  clipboardSyncInterval = setInterval(checkClipboardFromMobile, 1500);
-  console.log('Clipboard polling initialized (1.5s)');
+  clipboardSyncController.setupPolling();
 }
 
 type SupabaseContext = SupabaseRuntimeContext<SupabaseClient>;
