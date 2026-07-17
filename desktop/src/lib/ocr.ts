@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -7,6 +7,19 @@ import { analyzeImage, AiConfig } from './aiProviders';
 
 const OCR_PROMPT =
   'Bu görseldeki TÜM metni olduğu gibi çıkar. Satır düzenini koru. Yorum veya açıklama ekleme; sadece ham metin döndür.';
+const OCR_PROCESS_TIMEOUT_MS = 45_000;
+const activeOcrProcesses = new Set<ChildProcess>();
+
+export function stopOcrProcesses(): void {
+  for (const process of activeOcrProcesses) {
+    try {
+      process.kill();
+    } catch {
+      // Process may already have exited.
+    }
+  }
+  activeOcrProcesses.clear();
+}
 
 function loadEmbeddedOcrScript(): string {
   const bundled = path.join(__dirname, '..', 'ocr.ps1');
@@ -69,18 +82,36 @@ function resolveOcrScriptPath(): string {
 function runProcess(command: string, args: string[], label: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, { windowsHide: true });
+    activeOcrProcesses.add(proc);
     let stderr = '';
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      activeOcrProcesses.delete(proc);
+      if (error) reject(error);
+      else resolve();
+    };
+    const timeout = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch {
+        // Ignore a concurrent natural exit.
+      }
+      finish(new Error(`${label} ${OCR_PROCESS_TIMEOUT_MS / 1000} saniye içinde tamamlanmadı`));
+    }, OCR_PROCESS_TIMEOUT_MS);
 
     proc.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
-    proc.on('error', reject);
+    proc.on('error', (error) => finish(error));
     proc.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `${label} çıkış kodu ${code}`));
+        finish(new Error(stderr.trim() || `${label} çıkış kodu ${code}`));
         return;
       }
-      resolve();
+      finish();
     });
   });
 }

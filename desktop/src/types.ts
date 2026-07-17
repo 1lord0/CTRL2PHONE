@@ -27,9 +27,17 @@ export interface AppSettings {
   panelY?: number;
   /** When true the panel stays expanded after the mouse leaves. */
   panelPinned?: boolean;
+  /**
+   * Floating pill visibility when idle.
+   * - always: pill stays on screen (legacy default)
+   * - background: hidden while idle; briefly shown for status and during capture
+   * - capture-only: hidden except while a screen selection is active
+   */
+  pillVisibility?: 'always' | 'background' | 'capture-only';
 }
 
 export type PanelMode = 'compact' | 'presented';
+export type PillVisibility = NonNullable<AppSettings['pillVisibility']>;
 
 export interface Rect {
   x: number;
@@ -48,11 +56,18 @@ export interface OverlayState {
   active: boolean;
   selection: Rect | null;
   backgroundImage: string | null;
+  sessionId: number | null;
 }
 
 export interface SelectionPayload {
   type: 'start' | 'update';
   rect?: Rect;
+  sessionId: number;
+}
+
+export interface AnnotationPayload {
+  hasAnnotations: boolean;
+  sessionId: number;
 }
 
 export interface BridgeAPI {
@@ -62,6 +77,7 @@ export interface BridgeAPI {
       panelMode: PanelMode;
       pillMaxWidth: number;
       i18n: Record<string, string>;
+      phoneDownloads?: Array<{ path: string; name: string; isImage: boolean }>;
     }
   >;
   saveSettings: (settings: Partial<AppSettings>) => Promise<{ ok: boolean }>;
@@ -69,16 +85,21 @@ export interface BridgeAPI {
   captureNow: () => Promise<{ ok: boolean; mode?: string }>;
   openGemini: () => Promise<{ ok: boolean }>;
   focusGemini: () => Promise<{ ok: boolean }>;
+  notifyOverlayReady: () => Promise<{ ok: boolean }>;
+  notifyOverlayRendered: (sessionId: number) => Promise<{ ok: boolean }>;
   setSelection: (payload: SelectionPayload) => Promise<{ ok: boolean }>;
-  cancelSelection: () => Promise<{ ok: boolean }>;
-  setAnnotated: (hasAnnotations: boolean) => Promise<{ ok: boolean }>;
+  cancelSelection: (sessionId: number) => Promise<{ ok: boolean }>;
+  setAnnotated: (payload: AnnotationPayload) => Promise<{ ok: boolean }>;
+  startSelectionDrag: (sessionId: number) => void;
+  onSelectionDragState: (callback: (data: { sessionId: number; ready: boolean; reason?: string }) => void) => void;
+  copySelection: (sessionId: number) => Promise<{ ok: true } | { ok: false; error: string }>;
   onStatus: (callback: (message: string) => void) => void;
   onResponse: (callback: (message: string) => void) => void;
   onOverlayState: (callback: (state: OverlayState) => void) => void;
   onOverlayMessage: (callback: (message: string) => void) => void;
-  confirmSelectionGemini: () => Promise<{ ok: boolean }>;
-  confirmSelectionPhone: () => Promise<{ ok: boolean }>;
-  confirmSelectionOcr: () => Promise<{ ok: boolean }>;
+  confirmSelectionGemini: (sessionId: number) => Promise<{ ok: boolean }>;
+  confirmSelectionPhone: (sessionId: number) => Promise<{ ok: boolean }>;
+  confirmSelectionOcr: (sessionId: number) => Promise<{ ok: boolean }>;
   getStorageUsage: () => Promise<{
     ok: boolean;
     usedBytes?: number;
@@ -93,6 +114,7 @@ export interface BridgeAPI {
   panelInteractStart: () => Promise<{ ok: boolean }>;
   panelDragBy: (dx: number, dy: number) => Promise<{ ok: boolean }>;
   panelDismiss: () => Promise<{ ok: boolean; mode: PanelMode }>;
+  quitApp: () => Promise<{ ok: boolean }>;
   savePanelPinned: (pinned: boolean) => Promise<{ ok: boolean }>;
   panelResizeCompact: (size: { width: number; height: number }) => Promise<{
     ok: boolean;
@@ -103,6 +125,12 @@ export interface BridgeAPI {
   onHudCapturing: (callback: (active: boolean) => void) => void;
   onPillDragState: (callback: (dragging: boolean) => void) => void;
   onPillResized: (callback: (size: { width: number; height: number }) => void) => void;
+  onNotification: (callback: (data: { title: string; body: string; type: 'success' | 'info' | 'error' | 'sync' }) => void) => void;
+  onDismissNotification: (callback: () => void) => void;
+  uploadFileToPhone: (filePath: string) => Promise<{ ok: boolean }>;
+  startDragDownloadedFile: (filePath: string) => void;
+  deleteDownloadedFile: (filePath: string) => Promise<{ ok: boolean }>;
+  onPhoneDownloadsUpdated: (callback: (files: Array<{ path: string; name: string; isImage: boolean }>) => void) => void;
 }
 
 declare global {

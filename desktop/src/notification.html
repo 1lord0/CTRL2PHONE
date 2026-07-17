@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ctrl2Phone Notification</title>
+    <link rel="stylesheet" href="./notification.css" />
+  </head>
+  <body class="notification-body">
+    <div id="notificationBanner" class="notification-banner">
+      <div class="notification-icon" id="notificationIcon">
+        <!-- SVG icon will be injected here -->
+      </div>
+      <div class="notification-content">
+        <h4 class="notification-title" id="notificationTitle">Bildirim Başlığı</h4>
+        <p class="notification-desc" id="notificationDesc">Bildirim içeriği burada görüntülenecektir.</p>
+      </div>
+    </div>
+    <script src="./notification-renderer.js"></script>
+  </body>
+</html>

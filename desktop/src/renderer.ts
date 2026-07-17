@@ -11,6 +11,7 @@ const aiModelInput = document.getElementById('aiModel') as HTMLInputElement;
 const aiBaseUrlInput = document.getElementById('aiBaseUrl') as HTMLInputElement;
 const aiBaseUrlRow = document.getElementById('aiBaseUrlRow') as HTMLElement;
 const uiLanguageInput = document.getElementById('uiLanguage') as HTMLSelectElement;
+const pillVisibilityInput = document.getElementById('pillVisibility') as HTMLSelectElement;
 const statusNode = document.getElementById('status') as HTMLElement;
 const statusDot = document.getElementById('statusDot') as HTMLElement;
 const responseNode = document.getElementById('response') as HTMLElement;
@@ -48,6 +49,15 @@ function applyI18n(dict: Record<string, string>): void {
         el.placeholder = currentI18n[key];
       }
     });
+  document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-title');
+    if (key && currentI18n[key] != null) {
+      el.title = currentI18n[key];
+      if (el.hasAttribute('aria-label')) {
+        el.setAttribute('aria-label', currentI18n[key]);
+      }
+    }
+  });
   if (currentI18n['app.title']) {
     document.title = currentI18n['app.title'];
   }
@@ -61,6 +71,7 @@ function applyI18n(dict: Record<string, string>): void {
 // them to their localized placeholder on a language switch — these flags track that.
 let statusDirty = false;
 let responseDirty = false;
+let storageUsageRequestId = 0;
 let panelPinned = false;
 
 function setPanelVisualMode(mode: 'compact' | 'presented'): void {
@@ -99,7 +110,7 @@ function bindChromeButton(
 
 function initSpotlightPanel(): void {
   bindChromeButton(dismissPanelBtn, async () => {
-    await window.bridge.panelDismiss();
+    await window.bridge.quitApp();
   });
 
   bindChromeButton(pinPanelBtn, async () => {
@@ -167,8 +178,10 @@ async function updateQrCode(): Promise<void> {
 }
 
 async function updateStorageUsage(): Promise<void> {
+  const requestId = ++storageUsageRequestId;
   try {
     const result = await window.bridge.getStorageUsage();
+    if (requestId !== storageUsageRequestId) return;
     if (
       result?.ok &&
       typeof result.usedBytes === 'number' &&
@@ -189,6 +202,7 @@ async function updateStorageUsage(): Promise<void> {
       storageContainer.classList.add('hidden');
     }
   } catch (e) {
+    if (requestId !== storageUsageRequestId) return;
     console.error('Storage query error:', e);
     storageContainer.classList.add('hidden');
   }
@@ -225,6 +239,9 @@ function loadSettings(state: any): void {
     uiLanguageInput.value = state.language || 'system';
   }
   panelPinned = Boolean(state.panelPinned);
+  if (pillVisibilityInput) {
+    pillVisibilityInput.value = state.pillVisibility || 'always';
+  }
   updatePinUi();
   setPanelVisualMode('presented');
   updateAiProviderUi();
@@ -262,8 +279,14 @@ uiLanguageInput?.addEventListener('change', async () => {
   loadSettings(state);
 });
 
+document.getElementById('quitApp')?.addEventListener('click', async () => {
+  await window.bridge.quitApp();
+});
+
 initSpotlightPanel();
-window.bridge.ready().then(loadSettings);
+window.bridge.ready().then((state) => {
+  loadSettings(state);
+});
 
 window.bridge.onStatus((message) => {
   showStatus(message);
@@ -302,6 +325,8 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
     aiModel: aiModelInput?.value.trim() ?? '',
     aiBaseUrl: aiBaseUrlInput?.value.trim() ?? '',
     language: (uiLanguageInput?.value as 'system' | 'en' | 'tr') || 'system',
+    pillVisibility:
+      (pillVisibilityInput?.value as 'always' | 'background' | 'capture-only') || 'always',
   };
 
   const result = await window.bridge.saveSettings(payload);
@@ -389,4 +414,7 @@ document.getElementById('sendClipboard')?.addEventListener('click', async () => 
   }
 });
 
-export {};
+// NOT: Bu dosya bilinçli olarak global script'tir (overlay.ts gibi) — `export {}`
+// eklemeyin! Modül yapmak tsc'ye CommonJS önsözü (`exports` referansı) yazdırır ve
+// script tarayıcıda "exports is not defined" ile ilk satırda ölür: hiçbir buton
+// çalışmaz. Üst düzey isimler pill-renderer.ts/overlay.ts ile çakışmamalıdır.

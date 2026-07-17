@@ -3,7 +3,21 @@ declare module 'screenshot-desktop' {
     format?: 'png' | 'jpg';
     screen?: number | string | 'all';
   }
+  interface ScreenshotDisplay {
+    readonly id: string;
+    readonly name: string;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+    readonly left: number;
+    readonly width: number;
+    readonly height: number;
+    readonly dpiScale: number;
+  }
   function screenshot(options?: ScreenshotOptions): Promise<Buffer>;
+  namespace screenshot {
+    function listDisplays(): Promise<readonly ScreenshotDisplay[]>;
+  }
   export = screenshot;
 }
 

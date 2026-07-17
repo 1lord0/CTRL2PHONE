@@ -23,6 +23,7 @@ class KeyListener
     private const int VK_RETURN = 0x0D;
     private const int VK_M = 0x4D;
     private const int VK_C = 0x43;
+    private const int VK_F = 0x46;
     private const int VK_Q = 0x51;
     private const int VK_SPACE = 0x20;
 
@@ -128,18 +129,21 @@ class KeyListener
         stdinWatcher.Start();
 
         _hookID = SetHook(_proc);
+        if (_hookID != IntPtr.Zero)
+        {
+            Emit("READY");
+        }
+        else
+        {
+            Emit("HOOK_FAILED");
+        }
         Application.Run();
         UnhookWindowsHookEx(_hookID);
     }
 
     private static IntPtr SetHook(LowLevelKeyboardProc proc)
     {
-        using (Process curProcess = Process.GetCurrentProcess())
-        using (ProcessModule curModule = curProcess.MainModule)
-        {
-            return SetWindowsHookEx(WH_KEYBOARD_LL, proc,
-                GetModuleHandle(curModule.ModuleName), 0);
-        }
+        return SetWindowsHookEx(WH_KEYBOARD_LL, proc, IntPtr.Zero, 0);
     }
 
     private delegate IntPtr LowLevelKeyboardProc(

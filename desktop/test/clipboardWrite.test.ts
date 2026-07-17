@@ -1,4 +1,8 @@
-import { guardLocalClipboard, isLocalClipboardGuarded } from '../src/lib/clipboardWrite';
+import {
+  guardLocalClipboard,
+  isLocalClipboardGuarded,
+  writeTextToClipboardReliable,
+} from '../src/lib/clipboardWrite';
 
 describe('clipboard guard', () => {
   beforeEach(() => {
@@ -29,5 +33,11 @@ describe('clipboard guard', () => {
     guardLocalClipboard(5000);
     jest.advanceTimersByTime(1500);
     expect(isLocalClipboardGuarded()).toBe(true);
+  });
+
+  it('does not touch the clipboard after its operation becomes stale', async () => {
+    await expect(
+      writeTextToClipboardReliable('stale result', () => false)
+    ).resolves.toBe(false);
   });
 });

@@ -28,11 +28,11 @@ export function getVirtualBounds(displays: { bounds: Rect }[]): Rect {
   return { x: acc.x, y: acc.y, width: acc.right - acc.x, height: acc.bottom - acc.y };
 }
 
-/** Translate an overlay-relative rect into virtual-desktop absolute coordinates. */
-export function toAbsoluteRect(rect: Rect, virtualBounds: { x: number; y: number }): Rect {
+/** Translate an overlay-relative rect into desktop coordinates using its window origin. */
+export function toAbsoluteRect(rect: Rect, origin: { x: number; y: number }): Rect {
   return {
-    x: rect.x + virtualBounds.x,
-    y: rect.y + virtualBounds.y,
+    x: rect.x + origin.x,
+    y: rect.y + origin.y,
     width: rect.width,
     height: rect.height,
   };

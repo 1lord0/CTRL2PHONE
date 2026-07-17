@@ -1,15 +1,18 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
+
 :root {
-  --pill-bg: #121826;
-  --pill-bg-top: #1a2234;
-  --pill-bg-hover: #1c2538;
-  --pill-bg-capture: #182238;
-  --pill-border-color: rgba(148, 187, 255, 0.28);
-  --pill-border-active: rgba(79, 140, 255, 0.5);
-  --pill-highlight: rgba(255, 255, 255, 0.09);
-  --pill-glow: rgba(79, 140, 255, 0.22);
-  --pill-text: #e5eefc;
-  --pill-muted: #89a1c7;
-  --pill-radius: 22px;
+  --pill-bg: rgba(10, 10, 12, 0.88);
+  --pill-bg-top: rgba(18, 18, 24, 0.72);
+  --pill-bg-hover: rgba(22, 22, 30, 0.92);
+  --pill-border-color: rgba(255, 255, 255, 0.12);
+  --pill-border-active: rgba(139, 92, 246, 0.42);
+  --pill-border-capturing: rgba(96, 165, 250, 0.45);
+  --pill-text: #f3f4f6;
+  --pill-muted: #9ca3af;
+  --pill-radius: 99px;
+  --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #60a5fa 100%);
+  
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -24,8 +27,7 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--pill-bg) !important;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: transparent !important;
 }
 
 .pill-shell {
@@ -33,56 +35,53 @@ body,
   height: 100%;
   overflow: hidden;
   border-radius: var(--pill-radius);
-  background: linear-gradient(180deg, var(--pill-bg-top) 0%, var(--pill-bg) 100%);
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border-color);
   box-shadow:
-    inset 0 0 0 1px var(--pill-border-color),
-    inset 0 1px 0 var(--pill-highlight),
-    0 10px 28px rgba(0, 0, 0, 0.38),
-    0 0 0 1px rgba(0, 0, 0, 0.12);
-  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 12px 32px rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  animation: pillDropIn 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pillDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-100% - 12px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .pill-shell:hover {
-  background: linear-gradient(180deg, #1e283c 0%, var(--pill-bg-hover) 100%);
+  background: var(--pill-bg-hover);
+  border-color: rgba(255, 255, 255, 0.22);
   box-shadow:
-    inset 0 0 0 1px rgba(148, 187, 255, 0.36),
-    inset 0 1px 0 var(--pill-highlight),
-    0 12px 32px rgba(0, 0, 0, 0.42);
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 16px 40px rgba(0, 0, 0, 0.65);
 }
 
 .pill-shell:has(.pill-hud.is-active) {
-  box-shadow:
-    inset 0 0 0 1px var(--pill-border-active),
-    inset 0 1px 0 var(--pill-highlight),
-    0 0 0 1px var(--pill-glow);
+  border-color: var(--pill-border-active);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
 .pill-shell:has(.pill-hud.is-capturing) {
-  background: linear-gradient(180deg, #1a2844 0%, var(--pill-bg-capture) 100%);
-  animation: pillCapturePulse 1.8s ease-in-out infinite;
+  border-color: var(--pill-border-capturing);
+  animation: dynamicIslandPulse 2s infinite alternate;
 }
 
-@keyframes pillCapturePulse {
-  0%,
+@keyframes dynamicIslandPulse {
+  0% {
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.55);
+  }
   100% {
-    box-shadow:
-      inset 0 0 0 1px rgba(79, 140, 255, 0.45),
-      inset 0 1px 0 var(--pill-highlight),
-      0 0 12px rgba(79, 140, 255, 0.2);
+    box-shadow: 0 0 16px rgba(139, 92, 246, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.55);
   }
-  50% {
-    box-shadow:
-      inset 0 0 0 1px rgba(79, 140, 255, 0.7),
-      inset 0 1px 0 var(--pill-highlight),
-      0 0 20px rgba(79, 140, 255, 0.35);
-  }
-}
-
-.pill-shell,
-.pill-hud,
-.pill-open,
-.pill-status {
-  -webkit-app-region: no-drag;
 }
 
 .pill-hud {
@@ -91,8 +90,8 @@ body,
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
-  padding: 0 max(18px, calc(var(--pill-radius) * 0.35)) 0 max(14px, calc(var(--pill-radius) * 0.5));
+  gap: 12px;
+  padding: 0 18px 0 14px;
   overflow: hidden;
   background: transparent;
   border: none;
@@ -101,47 +100,43 @@ body,
   user-select: none;
 }
 
-.pill-hud.is-dragging {
-  cursor: grabbing;
-}
-
 .pill-open {
   flex-shrink: 0;
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.06) 100%);
-  color: #dbeafe;
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 0;
+  border: none;
+  background: var(--accent-gradient);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.3);
+  transition: all 0.2s ease;
 }
 
 .pill-open:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(148, 187, 255, 0.35);
-  transform: scale(1.04);
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.45);
+}
+
+.pill-open svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 
 .pill-status {
   flex: 1;
   min-width: 0;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   font-weight: 500;
-  line-height: 1.35;
   color: var(--pill-muted);
   text-align: left;
-  white-space: normal;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  word-break: break-word;
-  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: color 0.2s ease;
 }
 
@@ -152,9 +147,6 @@ body,
 
 .pill-status.is-overflow {
   display: block;
-  -webkit-line-clamp: unset;
-  -webkit-box-orient: unset;
-  white-space: nowrap;
   animation: pillMarquee 7s ease-in-out infinite alternate;
 }
 
@@ -167,9 +159,85 @@ body,
   }
 }
 
-.pill-status-measure {
-  font-size: 0.8rem;
-  font-weight: 500;
-  line-height: 1.35;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+.pill-downloads {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 320px;
+  overflow-x: auto;
+  padding: 2px 4px;
+}
+
+.pill-downloads::-webkit-scrollbar {
+  display: none;
+}
+
+.download-item {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.download-item:active {
+  cursor: grabbing;
+}
+
+.download-item:hover {
+  transform: scale(1.12);
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.download-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 5px;
+}
+
+.download-item .file-icon {
+  font-size: 8px;
+  font-weight: 700;
+  color: #a78bfa;
+  text-transform: uppercase;
+}
+
+.download-item-delete {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #fff;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.download-item:hover .download-item-delete {
+  display: flex;
+}
+
+.pill-shell.is-drag-over {
+  border-color: #8b5cf6 !important;
+  background: rgba(139, 92, 246, 0.2) !important;
+  box-shadow: 0 0 16px rgba(139, 92, 246, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  transform: scale(1.02);
 }

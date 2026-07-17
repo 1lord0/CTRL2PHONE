@@ -19,17 +19,22 @@ function sleep(ms: number): Promise<void> {
  * Write text to the OS clipboard with short retries and a read-back check.
  * Returns false when the payload is empty or the clipboard could not be updated.
  */
-export async function writeTextToClipboardReliable(text: string): Promise<boolean> {
+export async function writeTextToClipboardReliable(
+  text: string,
+  shouldContinue: () => boolean = () => true
+): Promise<boolean> {
   const payload = text ?? '';
-  if (!payload.trim()) {
+  if (!payload.trim() || !shouldContinue()) {
     return false;
   }
 
   guardLocalClipboard(8000);
 
   for (let attempt = 0; attempt < 4; attempt++) {
+    if (!shouldContinue()) return false;
     clipboard.writeText(payload);
     await sleep(40 + attempt * 30);
+    if (!shouldContinue()) return false;
 
     const readBack = clipboard.readText();
     if (readBack === payload) {
@@ -43,6 +48,7 @@ export async function writeTextToClipboardReliable(text: string): Promise<boolea
     }
   }
 
+  if (!shouldContinue()) return false;
   clipboard.writeText(payload);
   guardLocalClipboard(6000);
   const finalRead = clipboard.readText();

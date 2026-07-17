@@ -6,6 +6,7 @@ const btnGemini = document.getElementById('btnGemini');
 const btnPhone = document.getElementById('btnPhone');
 const btnOcr = document.getElementById('btnOcr');
 const btnCancel = document.getElementById('btnCancel');
+const btnCopy = document.getElementById('btnCopy');
 // ── Annotation layer ─────────────────────────────────────────────
 const annotationCanvas = document.getElementById('annotationCanvas');
 const actx = annotationCanvas.getContext('2d');
@@ -30,6 +31,20 @@ let drawStart = null;
 let liveStroke = null;
 let annotatedFlag = false;
 let bgDataUrl = null;
+let activeSessionId = null;
+let dragProxyReady = false;
+function observeHandshake(phase, acknowledgement) {
+    void acknowledgement
+        .then((result) => {
+        if (!result.ok) {
+            console.error(`[overlay] ${phase} handshake was rejected by the main process`);
+        }
+    })
+        .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[overlay] ${phase} handshake failed: ${message}`);
+    });
+}
 function boxFrom(a, b) {
     return {
         x: Math.min(a.x, b.x),
@@ -42,7 +57,9 @@ function syncAnnotatedFlag() {
     const has = annotations.length > 0;
     if (has !== annotatedFlag) {
         annotatedFlag = has;
-        window.bridge.setAnnotated(has);
+        if (activeSessionId !== null) {
+            window.bridge.setAnnotated({ hasAnnotations: has, sessionId: activeSessionId });
+        }
     }
 }
 function drawOne(ctx, a) {
@@ -85,20 +102,26 @@ function setTool(tool) {
         toolButtons[key].classList.toggle('active', key === tool);
     }
     document.body.classList.toggle('annotating', tool !== null);
+    const isDragReady = dragProxyReady && tool === null;
+    selectionBox.draggable = isDragReady;
+    selectionBox.classList.toggle('drag-ready', isDragReady);
 }
 function showToolbarIfReady() {
     toolbarEl.classList.toggle('hidden', !(currentRect && active));
 }
 function positionActionBar(rect) {
     const gap = 8;
-    const barHeight = actionBar.offsetHeight || 44;
-    let top = rect.y + rect.height + gap;
-    if (top + barHeight > window.innerHeight - 8) {
-        top = Math.max(8, rect.y - barHeight - gap);
-    }
-    const left = Math.max(8, rect.x + rect.width - actionBar.offsetWidth);
+    const viewportPadding = 8;
+    const barBounds = actionBar.getBoundingClientRect();
+    const barHeight = barBounds.height || 56;
+    const barWidth = barBounds.width || actionBar.offsetWidth;
+    const topCandidate = rect.y - barHeight - gap;
+    const bottomCandidate = rect.y + rect.height + gap;
+    const preferredTop = topCandidate >= viewportPadding ? topCandidate : bottomCandidate;
+    const top = Math.max(viewportPadding, Math.min(preferredTop, window.innerHeight - barHeight - viewportPadding));
+    const left = Math.max(viewportPadding, rect.x + rect.width - barWidth);
     actionBar.style.top = `${top}px`;
-    actionBar.style.left = `${left}px`;
+    actionBar.style.left = `${Math.min(left, window.innerWidth - barWidth - viewportPadding)}px`;
 }
 // ── Selection rendering (unchanged behavior) ─────────────────────
 function renderSelection(rect) {
@@ -154,6 +177,9 @@ window.addEventListener('mousedown', (event) => {
     if (actionBar.contains(event.target) || toolbarEl.contains(event.target)) {
         return;
     }
+    if (dragProxyReady && currentRect && selectionBox.contains(event.target)) {
+        return;
+    }
     if (currentTool) {
         drawing = true;
         drawStart = { x: event.clientX, y: event.clientY };
@@ -167,7 +193,9 @@ window.addEventListener('mousedown', (event) => {
     currentRect = { x: startPoint.x, y: startPoint.y, width: 0, height: 0 };
     overlayText.textContent = 'Alanı seçin (X / Enter ile Gemini, M ile Telefon)';
     renderSelection(currentRect);
-    window.bridge.setSelection({ type: 'start' });
+    if (activeSessionId !== null) {
+        window.bridge.setSelection({ type: 'start', sessionId: activeSessionId });
+    }
 });
 window.addEventListener('mouseup', async (event) => {
     if (!active || event.button !== 0) {
@@ -205,8 +233,10 @@ window.addEventListener('mouseup', async (event) => {
     currentRect = updateRect({ x: event.clientX, y: event.clientY });
     renderSelection(currentRect);
     if (currentRect && currentRect.width > 4 && currentRect.height > 4) {
-        await window.bridge.setSelection({ type: 'update', rect: currentRect });
-        overlayText.textContent = 'Seçim hazır. Çiz (kalem/kutu/karart) ya da gönder:';
+        if (activeSessionId !== null) {
+            await window.bridge.setSelection({ type: 'update', rect: currentRect, sessionId: activeSessionId });
+        }
+        overlayText.textContent = 'Seçim hazır — Kopyala düğmesini kullanın veya görseli tutup sürükleyin.';
         actionBar.classList.remove('hidden');
         positionActionBar(currentRect);
         showToolbarIfReady();
@@ -222,6 +252,13 @@ window.addEventListener('mouseup', async (event) => {
 });
 window.addEventListener('contextmenu', (event) => {
     event.preventDefault();
+});
+selectionBox.addEventListener('dragstart', (event) => {
+    event.preventDefault();
+    if (!active || !dragProxyReady || !currentRect || activeSessionId === null) {
+        return;
+    }
+    window.bridge.startSelectionDrag(activeSessionId);
 });
 // ── Toolbar buttons ──────────────────────────────────────────────
 toolButtons.pen.addEventListener('click', (e) => {
@@ -270,37 +307,76 @@ function bindOverlayAction(btn, handler) {
     btn.addEventListener('click', run);
 }
 // ── Action buttons ───────────────────────────────────────────────
+bindOverlayAction(btnCopy, () => {
+    const sessionId = activeSessionId;
+    if (sessionId === null || btnCopy.disabled)
+        return;
+    btnCopy.disabled = true;
+    window.bridge.copySelection(sessionId)
+        .then((result) => {
+        if (activeSessionId !== sessionId)
+            return;
+        if (result.ok) {
+            overlayText.textContent = 'Kopyalandı — görseli tutup başka bir uygulamaya da sürükleyebilirsiniz.';
+        }
+        else {
+            overlayText.textContent = `Kopyalanamadı: ${result.error || 'Bilinmeyen hata'}`;
+        }
+    })
+        .catch((err) => {
+        if (activeSessionId !== sessionId)
+            return;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        overlayText.textContent = `Hata: ${errMsg}`;
+    })
+        .finally(() => {
+        if (activeSessionId === sessionId) {
+            btnCopy.disabled = false;
+        }
+    });
+});
 bindOverlayAction(btnGemini, () => {
-    window.bridge.confirmSelectionGemini();
+    if (activeSessionId !== null)
+        window.bridge.confirmSelectionGemini(activeSessionId);
 });
 bindOverlayAction(btnPhone, () => {
-    window.bridge.confirmSelectionPhone();
+    if (activeSessionId !== null)
+        window.bridge.confirmSelectionPhone(activeSessionId);
 });
 bindOverlayAction(btnOcr, () => {
-    window.bridge.confirmSelectionOcr();
+    if (activeSessionId !== null)
+        window.bridge.confirmSelectionOcr(activeSessionId);
 });
 bindOverlayAction(btnCancel, () => {
-    window.bridge.cancelSelection();
+    if (activeSessionId !== null)
+        window.bridge.cancelSelection(activeSessionId);
 });
 // Klavye kısayolları — key_listener yedek yolu (overlay odakta iken).
 window.addEventListener('keydown', (e) => {
-    if (!active || !currentRect)
+    if (!active)
+        return;
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        if (activeSessionId !== null)
+            window.bridge.cancelSelection(activeSessionId);
+        return;
+    }
+    if (!currentRect)
         return;
     if (e.key === 'x' || e.key === 'X' || e.key === 'Enter') {
         e.preventDefault();
-        window.bridge.confirmSelectionGemini();
+        if (activeSessionId !== null)
+            window.bridge.confirmSelectionGemini(activeSessionId);
     }
     else if (e.key === 'm' || e.key === 'M') {
         e.preventDefault();
-        window.bridge.confirmSelectionPhone();
+        if (activeSessionId !== null)
+            window.bridge.confirmSelectionPhone(activeSessionId);
     }
     else if (e.key === 'c' || e.key === 'C') {
         e.preventDefault();
-        window.bridge.confirmSelectionOcr();
-    }
-    else if (e.key === 'Escape') {
-        e.preventDefault();
-        window.bridge.cancelSelection();
+        if (activeSessionId !== null)
+            window.bridge.confirmSelectionOcr(activeSessionId);
     }
 });
 // ── Composite the selection + annotations into a PNG for main ────
@@ -339,6 +415,7 @@ window.__ctrl2phoneCompose = () => {
 // ── Bridge state ─────────────────────────────────────────────────
 window.bridge.onOverlayState((state) => {
     active = Boolean(state?.active);
+    activeSessionId = state?.sessionId ?? null;
     selectionBox.classList.toggle('hidden', !state?.visible);
     // Ensure the annotation canvas matches the (just-resized) window size; the
     // window 'resize' event is unreliable across hide/show.
@@ -364,6 +441,10 @@ window.bridge.onOverlayState((state) => {
         annotatedFlag = false;
         setTool(null);
         redraw();
+        // Reset drag proxy state
+        dragProxyReady = false;
+        selectionBox.draggable = false;
+        selectionBox.classList.remove('drag-ready');
     }
     if (state?.selection) {
         currentRect = state.selection;
@@ -381,7 +462,19 @@ window.bridge.onOverlayState((state) => {
             toolbarEl.classList.add('hidden');
         }
     }
+    if (state?.visible && state.active && state.sessionId !== null) {
+        observeHandshake('rendered', window.bridge.notifyOverlayRendered(state.sessionId));
+    }
+});
+window.bridge.onSelectionDragState((data) => {
+    if (data.sessionId === activeSessionId) {
+        dragProxyReady = data.ready;
+        const isReady = data.ready && currentTool === null;
+        selectionBox.draggable = isReady;
+        selectionBox.classList.toggle('drag-ready', isReady);
+    }
 });
 window.bridge.onOverlayMessage((message) => {
     overlayText.textContent = message;
 });
+observeHandshake('ready', window.bridge.notifyOverlayReady());

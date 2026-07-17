@@ -19,15 +19,19 @@ function sleep(ms) {
  * Write text to the OS clipboard with short retries and a read-back check.
  * Returns false when the payload is empty or the clipboard could not be updated.
  */
-async function writeTextToClipboardReliable(text) {
+async function writeTextToClipboardReliable(text, shouldContinue = () => true) {
     const payload = text ?? '';
-    if (!payload.trim()) {
+    if (!payload.trim() || !shouldContinue()) {
         return false;
     }
     guardLocalClipboard(8000);
     for (let attempt = 0; attempt < 4; attempt++) {
+        if (!shouldContinue())
+            return false;
         electron_1.clipboard.writeText(payload);
         await sleep(40 + attempt * 30);
+        if (!shouldContinue())
+            return false;
         const readBack = electron_1.clipboard.readText();
         if (readBack === payload) {
             guardLocalClipboard(6000);
@@ -39,6 +43,8 @@ async function writeTextToClipboardReliable(text) {
             return true;
         }
     }
+    if (!shouldContinue())
+        return false;
     electron_1.clipboard.writeText(payload);
     guardLocalClipboard(6000);
     const finalRead = electron_1.clipboard.readText();

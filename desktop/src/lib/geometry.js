@@ -23,11 +23,11 @@ function getVirtualBounds(displays) {
     });
     return { x: acc.x, y: acc.y, width: acc.right - acc.x, height: acc.bottom - acc.y };
 }
-/** Translate an overlay-relative rect into virtual-desktop absolute coordinates. */
-function toAbsoluteRect(rect, virtualBounds) {
+/** Translate an overlay-relative rect into desktop coordinates using its window origin. */
+function toAbsoluteRect(rect, origin) {
     return {
-        x: rect.x + virtualBounds.x,
-        y: rect.y + virtualBounds.y,
+        x: rect.x + origin.x,
+        y: rect.y + origin.y,
         width: rect.width,
         height: rect.height,
     };

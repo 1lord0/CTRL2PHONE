@@ -9,6 +9,7 @@ using System.Windows.Forms;
 
 /// <summary>
 /// Windows native Spotlight pill — güvenilir tıklama/sürükleme.
+/// Tüm görsel tek OnPaint'te çizilir (çocuk kontrol yok → çift çizim/bulanıklık yok).
 /// </summary>
 sealed class PillHudForm : Form
 {
@@ -16,45 +17,58 @@ sealed class PillHudForm : Form
     const int MaxW = 720;
     const int MinH = 44;
     const int MaxH = 80;
-    const int DragSlop = 8;
     const int PadL = 14;
     const int PadR = 18;
     const int IconSize = 30;
     const int Gap = 10;
+    const int CS_DROPSHADOW = 0x20000;
 
-    static readonly Color BgTop = Color.FromArgb(255, 22, 30, 48);
-    static readonly Color BgBottom = Color.FromArgb(255, 14, 19, 32);
-    static readonly Color BgCaptureTop = Color.FromArgb(255, 26, 38, 62);
-    static readonly Color BgCaptureBottom = Color.FromArgb(255, 16, 24, 42);
-    static readonly Color TextMuted = Color.FromArgb(255, 137, 161, 199);
-    static readonly Color TextBright = Color.FromArgb(255, 229, 238, 252);
-    static readonly Color Accent = Color.FromArgb(255, 79, 140, 255);
-    static readonly Color BorderSoft = Color.FromArgb(48, 148, 187, 255);
-    static readonly Color BorderActive = Color.FromArgb(120, 79, 140, 255);
-    static readonly Color IconBg = Color.FromArgb(36, 255, 255, 255);
+    // TransparencyKey: köşeler tam şeffaf → SetWindowRgn sert kırpımının beyaz halesi yok.
+    static readonly Color TransparentKey = Color.FromArgb(255, 1, 2, 3);
 
-    readonly Label _status;
-    readonly Button _open;
+    static readonly Color BgTop = Color.FromArgb(255, 25, 34, 56);
+    static readonly Color BgBottom = Color.FromArgb(255, 13, 18, 31);
+    static readonly Color BgHoverTop = Color.FromArgb(255, 31, 42, 68);
+    static readonly Color BgHoverBottom = Color.FromArgb(255, 17, 24, 40);
+    static readonly Color BgCaptureTop = Color.FromArgb(255, 28, 42, 72);
+    static readonly Color BgCaptureBottom = Color.FromArgb(255, 16, 25, 46);
+    static readonly Color TextMuted = Color.FromArgb(255, 143, 166, 202);
+    static readonly Color TextBright = Color.FromArgb(255, 232, 240, 253);
+    static readonly Color Accent = Color.FromArgb(255, 91, 149, 255);
+    static readonly Color AccentSoft = Color.FromArgb(255, 132, 176, 255);
+
     readonly Font _statusFont;
     readonly ConcurrentQueue<string> _outbox = new ConcurrentQueue<string>();
     readonly AutoResetEvent _outboxSignal = new AutoResetEvent(false);
-    readonly System.Windows.Forms.Timer _pulseTimer;
+    readonly System.Windows.Forms.Timer _animTimer;
 
+    string _statusText = "Hazır";
     bool _pressing;
-    bool _dragging;
     bool _hovered;
     bool _capturing;
     bool _statusBright;
+    float _hoverT;   // 0..1 yumuşak hover geçişi
+    float _pressT;   // 0..1 basılıyken hafif koyulaşma
     float _pulse;
-    Point _pressScreen;
-    Point _dragAnchor;
+    Point _targetLocation;
+    bool _slideAnimating;
     int _maxTextW = 520;
 
-    [DllImport("gdi32.dll")]
-    static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int w, int h);
+    // Overlay seçim modundayken pill odak çalmamalı — aksi halde ilk seferde fare/klavye ölü kalır.
+    protected override bool ShowWithoutActivation
+    {
+        get { return true; }
+    }
 
-    [DllImport("user32.dll")]
-    static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool redraw);
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ClassStyle |= CS_DROPSHADOW; // kapsülün altına yumuşak sistem gölgesi
+            return cp;
+        }
+    }
 
     public PillHudForm()
     {
@@ -62,8 +76,10 @@ sealed class PillHudForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        BackColor = BgBottom;
+        BackColor = TransparentKey;
+        TransparencyKey = TransparentKey;
         ForeColor = TextMuted;
+        Cursor = Cursors.Hand;
         Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
         _statusFont = new Font("Segoe UI", 9.25f, FontStyle.Regular, GraphicsUnit.Point);
         DoubleBuffered = true;
@@ -71,68 +87,60 @@ sealed class PillHudForm : Form
         Width = 320;
         Height = 52;
 
-        _open = new Button
+        MouseDown += OnPressDown;
+        MouseMove += OnPressMove;
+        MouseUp += OnPressUp;
+        MouseEnter += delegate { _hovered = true; };
+        MouseLeave += delegate
         {
-            Text = string.Empty,
-            FlatStyle = FlatStyle.Flat,
-            Size = new Size(IconSize, IconSize),
-            Location = new Point(PadL, (MinH - IconSize) / 2),
-            TabStop = false,
-            Cursor = Cursors.Hand,
-            BackColor = Color.Transparent,
-            ForeColor = Color.Transparent,
-        };
-        _open.FlatAppearance.BorderSize = 0;
-        _open.FlatAppearance.MouseOverBackColor = Color.Transparent;
-        _open.FlatAppearance.MouseDownBackColor = Color.Transparent;
-
-        _status = new Label
-        {
-            AutoSize = false,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Location = new Point(PadL + IconSize + Gap, 0),
-            Size = new Size(Width - (PadL + IconSize + Gap + PadR), MinH),
-            Text = "Hazır",
-            Cursor = Cursors.Hand,
-            BackColor = Color.Transparent,
-            ForeColor = TextMuted,
-            Font = _statusFont,
+            _hovered = ClientRectangle.Contains(PointToClient(Control.MousePosition));
         };
 
-        Controls.Add(_status);
-        Controls.Add(_open);
-
-        WirePointer(_open);
-        WirePointer(_status);
-        WirePointer(this);
-
-        MouseEnter += delegate { _hovered = true; Invalidate(); };
-        MouseLeave += delegate { if (!ClientRectangle.Contains(PointToClient(Control.MousePosition))) { _hovered = false; Invalidate(); } };
-
-        _pulseTimer = new System.Windows.Forms.Timer { Interval = 40 };
-        _pulseTimer.Tick += delegate
+        // Tek animasyon zamanlayıcısı: hover/press geçişleri + yakalama nabzı.
+        _animTimer = new System.Windows.Forms.Timer { Interval = 33 };
+        _animTimer.Tick += delegate
         {
-            _pulse += _capturing ? 0.12f : 0.08f;
-            if (_pulse > Math.PI * 2f) _pulse -= (float)(Math.PI * 2);
-            if (_capturing || _statusBright) Invalidate();
-        };
-        _pulseTimer.Start();
+            bool dirty = false;
 
-        ApplyRoundRegion();
-    }
+            if (_slideAnimating)
+            {
+                int distance = _targetLocation.Y - Location.Y;
+                if (Math.Abs(distance) <= 2)
+                {
+                    Location = _targetLocation;
+                    _slideAnimating = false;
+                }
+                else
+                {
+                    Location = new Point(_targetLocation.X, Location.Y + Math.Max(1, (int)Math.Round(distance * 0.34f)));
+                }
+            }
 
-    void WirePointer(Control c)
-    {
-        c.MouseDown += OnPressDown;
-        c.MouseMove += OnPressMove;
-        c.MouseUp += OnPressUp;
-        c.MouseEnter += delegate { _hovered = true; Invalidate(); };
-        c.MouseLeave += delegate
-        {
-            Point p = PointToClient(Control.MousePosition);
-            _hovered = ClientRectangle.Contains(p);
-            Invalidate();
+            float hoverTarget = _hovered ? 1f : 0f;
+            if (Math.Abs(_hoverT - hoverTarget) > 0.01f)
+            {
+                _hoverT += (hoverTarget - _hoverT) * 0.28f;
+                dirty = true;
+            }
+
+            float pressTarget = _pressing ? 1f : 0f;
+            if (Math.Abs(_pressT - pressTarget) > 0.01f)
+            {
+                _pressT += (pressTarget - _pressT) * 0.45f;
+                dirty = true;
+            }
+
+            if (_capturing || _statusBright)
+            {
+                _pulse += _capturing ? 0.14f : 0.09f;
+                if (_pulse > Math.PI * 2f) _pulse -= (float)(Math.PI * 2);
+                dirty = true;
+            }
+
+            if (dirty) Invalidate();
         };
+        _animTimer.Start();
+
     }
 
     void Emit(string msg)
@@ -141,14 +149,7 @@ sealed class PillHudForm : Form
         _outboxSignal.Set();
     }
 
-    void ApplyRoundRegion()
-    {
-        int r = Math.Max(8, Height / 2);
-        IntPtr hrgn = CreateRoundRectRgn(0, 0, Width + 1, Height + 1, r * 2, r * 2);
-        if (hrgn != IntPtr.Zero) SetWindowRgn(Handle, hrgn, true);
-    }
-
-    GraphicsPath CapsulePath(Rectangle bounds)
+    static GraphicsPath CapsulePath(Rectangle bounds)
     {
         int r = Math.Max(8, bounds.Height / 2);
         var path = new GraphicsPath();
@@ -160,6 +161,16 @@ sealed class PillHudForm : Form
         return path;
     }
 
+    static Color Lerp(Color a, Color b, float t)
+    {
+        t = Math.Max(0f, Math.Min(1f, t));
+        return Color.FromArgb(
+            (int)(a.A + (b.A - a.A) * t),
+            (int)(a.R + (b.R - a.R) * t),
+            (int)(a.G + (b.G - a.G) * t),
+            (int)(a.B + (b.B - a.B) * t));
+    }
+
     protected override void OnPaintBackground(PaintEventArgs e)
     {
     }
@@ -168,58 +179,98 @@ sealed class PillHudForm : Form
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.CompositingQuality = CompositingQuality.HighQuality;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
         var bounds = new Rectangle(0, 0, Width, Height);
+        var capsule = new Rectangle(0, 0, Width - 1, Height - 1);
 
-        Color top = _capturing ? BgCaptureTop : (_hovered || _statusBright ? Color.FromArgb(255, 24, 32, 50) : BgTop);
-        Color bottom = _capturing ? BgCaptureBottom : (_hovered || _statusBright ? Color.FromArgb(255, 16, 22, 36) : BgBottom);
+        g.Clear(TransparentKey);
 
-        using (var path = CapsulePath(new Rectangle(0, 0, Width - 1, Height - 1)))
+        // ── Zemin: durum + hover + basış karışımı ──
+        Color top = Lerp(BgTop, BgHoverTop, _hoverT);
+        Color bottom = Lerp(BgBottom, BgHoverBottom, _hoverT);
+        if (_capturing)
+        {
+            top = BgCaptureTop;
+            bottom = BgCaptureBottom;
+        }
+        // Basılıyken çok hafif koyulaştır (dokunsal geri bildirim).
+        top = Lerp(top, Color.FromArgb(255, top.R * 4 / 5, top.G * 4 / 5, top.B * 4 / 5), _pressT * 0.6f);
+        bottom = Lerp(bottom, Color.FromArgb(255, bottom.R * 4 / 5, bottom.G * 4 / 5, bottom.B * 4 / 5), _pressT * 0.6f);
+
+        using (var path = CapsulePath(capsule))
         using (var brush = new LinearGradientBrush(bounds, top, bottom, LinearGradientMode.Vertical))
         {
             g.FillPath(brush, path);
         }
 
-        float glow = _capturing ? (0.55f + 0.35f * (float)Math.Sin(_pulse)) : (_statusBright ? 0.45f : 0f);
-        Color border = Color.FromArgb(
-            (int)(48 + glow * 80),
-            (int)(148 + glow * 20),
-            (int)(187 + glow * 10),
-            255);
-        if (_capturing) border = Color.FromArgb((int)(90 + 50 * Math.Sin(_pulse)), 79, 140, 255);
-
-        using (var path = CapsulePath(new Rectangle(0, 0, Width - 1, Height - 1)))
-        using (var pen = new Pen(border, 1f))
+        // ── Kenarlık: bekleme → hover → yakalama nabzı ──
+        Color border;
+        if (_capturing)
+        {
+            int pulseA = (int)(110 + 70 * Math.Sin(_pulse));
+            border = Color.FromArgb(pulseA, Accent);
+        }
+        else if (_statusBright)
+        {
+            border = Color.FromArgb(120, AccentSoft);
+        }
+        else
+        {
+            border = Lerp(Color.FromArgb(52, 148, 187, 255), Color.FromArgb(110, 148, 187, 255), _hoverT);
+        }
+        using (var path = CapsulePath(capsule))
+        using (var pen = new Pen(border, 1f) { Alignment = PenAlignment.Inset })
         {
             g.DrawPath(pen, path);
         }
 
-        using (var highlight = new Pen(Color.FromArgb(28, 255, 255, 255), 1f))
+        // Üst iç ışık — mavi tonlu, beyaz halo yok
+        using (var highlight = new Pen(Color.FromArgb((int)(18 + 12 * _hoverT), 120, 165, 230), 1f))
         {
             int r = Math.Max(8, Height / 2);
-            g.DrawLine(highlight, r, 1, Width - r, 1);
+            g.DrawLine(highlight, r + 1, 1, Width - r - 1, 1);
         }
 
+        // ── İkon: vektör mercek (daire + sap), hover'da vurgu rengi ──
         var iconRect = new Rectangle(PadL, Math.Max(0, (Height - IconSize) / 2), IconSize, IconSize);
+        Color iconBg = Color.FromArgb((int)(34 + 28 * _hoverT), 42, 62, 98);
+        Color iconBorder = Color.FromArgb((int)(55 + 65 * _hoverT), 100, 150, 230);
+        Color ringColor = Lerp(Color.FromArgb(210, TextBright), Accent, _hoverT);
+        if (_capturing) ringColor = Color.FromArgb((int)(190 + 60 * Math.Sin(_pulse)) > 255 ? 255 : (int)(190 + 60 * Math.Sin(_pulse)), Accent);
+
         using (var iconPath = new GraphicsPath())
         {
             iconPath.AddEllipse(iconRect);
-            using (var iconBrush = new SolidBrush(IconBg))
-            using (var iconPen = new Pen(Color.FromArgb(40, 255, 255, 255), 1f))
+            using (var iconBrush = new LinearGradientBrush(
+                iconRect,
+                Color.FromArgb((int)(42 + 24 * _hoverT), 56, 78, 118),
+                iconBg,
+                LinearGradientMode.Vertical))
+            using (var iconPen = new Pen(iconBorder, 1f) { Alignment = PenAlignment.Inset })
             {
                 g.FillPath(iconBrush, iconPath);
                 g.DrawPath(iconPen, iconPath);
             }
         }
-        TextRenderer.DrawText(
-            g,
-            "\u2315",
-            new Font("Segoe UI", 11f, FontStyle.Regular),
-            iconRect,
-            TextBright,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
-        Color textColor = _statusBright || _capturing ? TextBright : TextMuted;
+        // Mercek gövdesi: ikonun ortasında küçük daire, sağ-alta inen kısa sap.
+        float cx = iconRect.X + iconRect.Width * 0.44f;
+        float cy = iconRect.Y + iconRect.Height * 0.44f;
+        float lensR = iconRect.Width * 0.20f;
+        using (var lensPen = new Pen(ringColor, 1.8f))
+        {
+            lensPen.StartCap = LineCap.Round;
+            lensPen.EndCap = LineCap.Round;
+            g.DrawEllipse(lensPen, cx - lensR, cy - lensR, lensR * 2, lensR * 2);
+            float hx = cx + lensR * 0.72f;
+            float hy = cy + lensR * 0.72f;
+            g.DrawLine(lensPen, hx, hy, hx + iconRect.Width * 0.16f, hy + iconRect.Height * 0.16f);
+        }
+
+        // ── Durum metni ──
+        Color textColor = _statusBright || _capturing ? TextBright : Lerp(TextMuted, TextBright, _hoverT * 0.55f);
         var textRect = new Rectangle(
             PadL + IconSize + Gap,
             0,
@@ -227,7 +278,7 @@ sealed class PillHudForm : Form
             Height);
         TextRenderer.DrawText(
             g,
-            _status.Text,
+            _statusText,
             _statusFont,
             textRect,
             textColor,
@@ -238,35 +289,25 @@ sealed class PillHudForm : Form
     {
         if (e.Button != MouseButtons.Left) return;
         _pressing = true;
-        _dragging = false;
-        _pressScreen = Control.MousePosition;
-        _dragAnchor = Location;
     }
 
     void OnPressMove(object sender, MouseEventArgs e)
     {
-        if (!_pressing || (Control.MouseButtons & MouseButtons.Left) == 0) return;
-        Point cur = Control.MousePosition;
-        int dx = cur.X - _pressScreen.X;
-        int dy = cur.Y - _pressScreen.Y;
-        if (!_dragging && (Math.Abs(dx) >= DragSlop || Math.Abs(dy) >= DragSlop)) _dragging = true;
-        if (_dragging) Location = new Point(_dragAnchor.X + dx, _dragAnchor.Y + dy);
+        // The pill is anchored to the top-center; pointer movement must not reposition it.
     }
 
     void OnPressUp(object sender, MouseEventArgs e)
     {
         if (!_pressing || e.Button != MouseButtons.Left) return;
-        if (!_dragging) Emit("PILL_TOGGLE");
-        else Emit("PILL_MOVED:" + Location.X + ":" + Location.Y);
+        Emit("PILL_TOGGLE");
         _pressing = false;
-        _dragging = false;
     }
 
     void SetStatusText(string text)
     {
         string oneLine = (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
         if (oneLine.Length == 0) oneLine = " ";
-        _status.Text = oneLine;
+        _statusText = oneLine;
         ResizeToStatus(oneLine);
         Invalidate();
     }
@@ -290,10 +331,6 @@ sealed class PillHudForm : Form
 
         Width = w;
         Height = h;
-        _open.Location = new Point(PadL, Math.Max(0, (h - IconSize) / 2));
-        _status.Location = new Point(PadL + IconSize + Gap, 0);
-        _status.Size = new Size(w - (PadL + IconSize + Gap + PadR), h);
-        ApplyRoundRegion();
         Emit("PILL_RESIZED:" + w + ":" + h);
         Invalidate();
     }
@@ -327,7 +364,11 @@ sealed class PillHudForm : Form
         {
             string[] p = line.Substring(4).Split(':');
             int x, y;
-            if (p.Length >= 2 && int.TryParse(p[0], out x) && int.TryParse(p[1], out y)) Location = new Point(x, y);
+            if (p.Length >= 2 && int.TryParse(p[0], out x) && int.TryParse(p[1], out y))
+            {
+                _targetLocation = new Point(x, y);
+                if (!_slideAnimating) Location = _targetLocation;
+            }
         }
         else if (line.StartsWith("SIZE:"))
         {
@@ -337,9 +378,6 @@ sealed class PillHudForm : Form
             {
                 Width = Math.Min(MaxW, Math.Max(MinW, w));
                 Height = Math.Min(MaxH, Math.Max(MinH, h));
-                _open.Location = new Point(PadL, Math.Max(0, (Height - IconSize) / 2));
-                _status.Size = new Size(Width - (PadL + IconSize + Gap + PadR), Height);
-                ApplyRoundRegion();
                 Invalidate();
             }
         }
@@ -349,8 +387,17 @@ sealed class PillHudForm : Form
             if (int.TryParse(line.Substring(5), out mw) && mw > MinW)
                 _maxTextW = Math.Min(MaxW - (PadL + IconSize + Gap + PadR), mw - (PadL + IconSize + Gap + PadR));
         }
-        else if (line == "SHOW") { Show(); TopMost = true; }
-        else if (line == "HIDE") Hide();
+        else if (line == "SHOW")
+        {
+            if (!Visible)
+            {
+                Location = new Point(_targetLocation.X, _targetLocation.Y - Height - 18);
+                _slideAnimating = true;
+                Show();
+            }
+            TopMost = true;
+        }
+        else if (line == "HIDE") { _slideAnimating = false; Hide(); }
         else if (line.StartsWith("CAPTURE:")) SetCapturing(line.EndsWith("1"));
         else if (line == "ACTIVE") FlashActive();
         else if (line == "QUIT") Close();
@@ -359,11 +406,16 @@ sealed class PillHudForm : Form
     [STAThread]
     public static void Main()
     {
-        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
-        Console.InputEncoding = new System.Text.UTF8Encoding(false);
+        // Console.Input/OutputEncoding setter'ları konsolu olmayan winexe'de
+        // SetConsoleCP çağırıp IOException fırlatır (Electron pipe ile başlatır,
+        // konsol yoktur). Bu yüzden stdio üzerinde doğrudan UTF-8 stream kullan.
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var form = new PillHudForm();
+
+        var stdout = new System.IO.StreamWriter(
+            Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false));
+        stdout.AutoFlush = true;
 
         var outThread = new Thread(() =>
         {
@@ -373,8 +425,7 @@ sealed class PillHudForm : Form
                 {
                     form._outboxSignal.WaitOne(500);
                     string msg;
-                    while (form._outbox.TryDequeue(out msg)) Console.WriteLine(msg);
-                    Console.Out.Flush();
+                    while (form._outbox.TryDequeue(out msg)) stdout.WriteLine(msg);
                 }
             }
             catch { }
@@ -382,12 +433,15 @@ sealed class PillHudForm : Form
         outThread.IsBackground = true;
         outThread.Start();
 
+        var stdin = new System.IO.StreamReader(
+            Console.OpenStandardInput(), new System.Text.UTF8Encoding(false));
+
         var inThread = new Thread(() =>
         {
             try
             {
                 string line;
-                while ((line = Console.ReadLine()) != null)
+                while ((line = stdin.ReadLine()) != null)
                 {
                     string cmd = line;
                     form.BeginInvoke(new Action(() => form.HandleCommand(cmd)));

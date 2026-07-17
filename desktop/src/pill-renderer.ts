@@ -1,13 +1,15 @@
+// NOT: Bu dosya bilinçli olarak global script'tir (overlay.ts gibi) — `export {}`
+// eklemeyin! Modül yapmak tsc'ye CommonJS önsözü (`exports` referansı) yazdırır ve
+// script tarayıcıda "exports is not defined" ile ilk satırda ölür. Üst düzey isimler
+// renderer.ts/overlay.ts ile çakışmamalıdır (bu yüzden pill* önekleri kullanılıyor).
 const pillHud = document.getElementById('pillHud') as HTMLElement;
 const pillOpenBtn = document.getElementById('pillOpen') as HTMLButtonElement;
 const pillStatusNode = document.getElementById('pillStatus') as HTMLElement;
 
-const PILL_DRAG_SLOP = 10;
+let pillI18n: Record<string, string> = {};
 
-let currentI18n: Record<string, string> = {};
-
-function t(key: string, fallback: string): string {
-  return currentI18n[key] ?? fallback;
+function pillT(key: string, fallback: string): string {
+  return pillI18n[key] ?? fallback;
 }
 
 const PILL_ICON = 28;
@@ -51,7 +53,11 @@ function measureCompactStatus(text: string): { width: number; height: number } {
 
   const singleLineW = compactMeasureNode.scrollWidth;
   const singleLineH = compactMeasureNode.offsetHeight;
-  const chromeW = PILL_CHROME_PAD_X + 4;
+  
+  const downloadsNode = document.getElementById('pillDownloads');
+  const downloadsW = downloadsNode ? downloadsNode.getBoundingClientRect().width : 0;
+  
+  const chromeW = PILL_CHROME_PAD_X + 4 + (downloadsW > 0 ? downloadsW + 12 : 0);
   const textSlotMax = pillMaxWidth - chromeW;
 
   if (singleLineW <= textSlotMax) {
@@ -93,13 +99,13 @@ function scheduleCompactPillResize(text?: string): void {
   if (compactResizeTimer) clearTimeout(compactResizeTimer);
   compactResizeTimer = setTimeout(() => {
     compactResizeTimer = null;
-    const sample = text ?? pillStatusNode?.textContent ?? t('status.ready', 'Hazır');
+    const sample = text ?? pillStatusNode?.textContent ?? pillT('status.ready', 'Hazır');
     const size = measureCompactStatus(sample);
     void window.bridge.panelResizeCompact(size).then(() => updateCompactOverflow());
   }, 32);
 }
 
-function showStatus(text: string): void {
+function showPillStatus(text: string): void {
   const oneLine = text.replace(/\s+/g, ' ').trim();
   if (pillStatusNode) {
     pillStatusNode.textContent = oneLine;
@@ -111,72 +117,67 @@ function showStatus(text: string): void {
   setTimeout(() => pillHud?.classList.remove('is-active'), 2400);
 }
 
+interface DownloadedFile {
+  path: string;
+  name: string;
+  isImage: boolean;
+}
+
+const pillDownloads = document.getElementById('pillDownloads') as HTMLElement;
+
+function renderDownloads(files: DownloadedFile[]): void {
+  if (!pillDownloads) return;
+  pillDownloads.innerHTML = '';
+  
+  files.forEach((file) => {
+    const item = document.createElement('div');
+    item.className = 'download-item';
+    item.setAttribute('draggable', 'true');
+    item.title = file.name;
+    
+    const span = document.createElement('span');
+    span.className = 'file-icon';
+    const parts = file.name.split('.');
+    span.textContent = parts[parts.length - 1] || '???';
+    item.appendChild(span);
+    
+    item.addEventListener('dragstart', (e) => {
+      e.preventDefault();
+      window.bridge.startDragDownloadedFile(file.path);
+    });
+    
+    const deleteBtn = document.createElement('div');
+    deleteBtn.className = 'download-item-delete';
+    deleteBtn.innerHTML = '&times;';
+    deleteBtn.title = 'Sil';
+    deleteBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void window.bridge.deleteDownloadedFile(file.path);
+    });
+    
+    item.appendChild(deleteBtn);
+    pillDownloads.appendChild(item);
+  });
+  
+  scheduleCompactPillResize();
+}
+
 function bindPillUi(): void {
-  let pressing = false;
-  let dragging = false;
-  let didDrag = false;
-  let pressScreenX = 0;
-  let pressScreenY = 0;
-  let lastScreenX = 0;
-  let lastScreenY = 0;
-
-  const endPress = (): void => {
-    if (!pressing) return;
-    pressing = false;
-    dragging = false;
-    pillHud?.classList.remove('is-dragging');
-  };
-
   const onMouseDown = (e: MouseEvent): void => {
     if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.download-item')) return;
     void window.bridge.panelInteractStart();
-    pressing = true;
-    dragging = false;
-    didDrag = false;
-    pressScreenX = e.screenX;
-    pressScreenY = e.screenY;
-    lastScreenX = e.screenX;
-    lastScreenY = e.screenY;
-  };
-
-  const onMouseMove = (e: MouseEvent): void => {
-    if (!pressing) return;
-    if (
-      !dragging &&
-      Math.hypot(e.screenX - pressScreenX, e.screenY - pressScreenY) >= PILL_DRAG_SLOP
-    ) {
-      dragging = true;
-      didDrag = true;
-      pillHud?.classList.add('is-dragging');
-    }
-    if (!dragging) return;
-    const dx = e.screenX - lastScreenX;
-    const dy = e.screenY - lastScreenY;
-    if (dx !== 0 || dy !== 0) {
-      void window.bridge.panelDragBy(dx, dy);
-      lastScreenX = e.screenX;
-      lastScreenY = e.screenY;
-    }
-  };
-
-  const onMouseUp = (): void => {
-    endPress();
   };
 
   const onHudClick = (e: MouseEvent): void => {
-    if (didDrag) {
-      didDrag = false;
-      return;
-    }
     if ((e.target as HTMLElement).closest('#pillOpen')) return;
+    if ((e.target as HTMLElement).closest('.download-item')) return;
     e.preventDefault();
     void window.bridge.panelToggle();
   };
 
-  // Capture fazı: pill'in her yerinde tıklama + sürükleme.
   pillHud?.addEventListener('mousedown', onMouseDown, true);
-  document.addEventListener('mousemove', onMouseMove, true);
-  document.addEventListener('mouseup', onMouseUp, true);
   pillHud?.addEventListener('click', onHudClick, true);
 
   pillOpenBtn?.addEventListener('click', (e) => {
@@ -193,6 +194,46 @@ function bindPillUi(): void {
   });
   pillHud?.setAttribute('tabindex', '0');
 
+  const shell = document.getElementById('pillShell');
+  if (shell) {
+    shell.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      shell.classList.add('is-drag-over');
+    });
+
+    shell.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      shell.classList.add('is-drag-over');
+    });
+
+    shell.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      shell.classList.remove('is-drag-over');
+    });
+
+    shell.addEventListener('dragend', () => {
+      shell.classList.remove('is-drag-over');
+    });
+
+    shell.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      shell.classList.remove('is-drag-over');
+
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+        for (let i = 0; i < e.dataTransfer.files.length; i++) {
+          const file = e.dataTransfer.files[i];
+          if (file && file.path) {
+            void window.bridge.uploadFileToPhone(file.path);
+          }
+        }
+      }
+    });
+  }
+
   window.bridge.onHudCapturing((active) => {
     pillHud?.classList.toggle('is-capturing', active);
   });
@@ -205,25 +246,28 @@ function bindPillUi(): void {
     applyPillGeometry();
     scheduleCompactPillResize();
   });
-  window.bridge.onStatus((message) => showStatus(message));
+  window.bridge.onStatus((message) => showPillStatus(message));
+  window.bridge.onPhoneDownloadsUpdated((files) => renderDownloads(files));
 }
 
 bindPillUi();
 
 window.bridge.ready().then((state) => {
-  currentI18n = state.i18n || {};
+  pillI18n = state.i18n || {};
   if (typeof state.pillMaxWidth === 'number' && state.pillMaxWidth > 0) {
     pillMaxWidth = state.pillMaxWidth;
   }
   const readyText = state.selectionActive
-    ? t('status.selectionActive', 'Seçim modu açık')
-    : t('status.ready', 'Hazır');
+    ? pillT('status.selectionActive', 'Seçim modu açık')
+    : pillT('status.ready', 'Hazır');
   if (pillStatusNode) {
     pillStatusNode.textContent = readyText.replace(/\s+/g, ' ').trim();
     pillStatusNode.title = pillStatusNode.textContent;
     applyPillGeometry();
-    scheduleCompactPillResize(pillStatusNode.textContent);
+    if (state.phoneDownloads) {
+      renderDownloads(state.phoneDownloads);
+    } else {
+      scheduleCompactPillResize(pillStatusNode.textContent);
+    }
   }
 });
-
-export {};

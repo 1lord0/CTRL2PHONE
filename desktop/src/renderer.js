@@ -1,5 +1,4 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
 const promptInput = document.getElementById('prompt');
 const supabaseUrlInput = document.getElementById('supabaseUrl');
 const supabaseKeyInput = document.getElementById('supabaseKey');
@@ -13,6 +12,7 @@ const aiModelInput = document.getElementById('aiModel');
 const aiBaseUrlInput = document.getElementById('aiBaseUrl');
 const aiBaseUrlRow = document.getElementById('aiBaseUrlRow');
 const uiLanguageInput = document.getElementById('uiLanguage');
+const pillVisibilityInput = document.getElementById('pillVisibility');
 const statusNode = document.getElementById('status');
 const statusDot = document.getElementById('statusDot');
 const responseNode = document.getElementById('response');
@@ -46,6 +46,15 @@ function applyI18n(dict) {
             el.placeholder = currentI18n[key];
         }
     });
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+        const key = el.getAttribute('data-i18n-title');
+        if (key && currentI18n[key] != null) {
+            el.title = currentI18n[key];
+            if (el.hasAttribute('aria-label')) {
+                el.setAttribute('aria-label', currentI18n[key]);
+            }
+        }
+    });
     if (currentI18n['app.title']) {
         document.title = currentI18n['app.title'];
     }
@@ -58,6 +67,7 @@ function applyI18n(dict) {
 // them to their localized placeholder on a language switch — these flags track that.
 let statusDirty = false;
 let responseDirty = false;
+let storageUsageRequestId = 0;
 let panelPinned = false;
 function setPanelVisualMode(mode) {
     document.body.dataset.panelMode = mode;
@@ -92,7 +102,7 @@ function bindChromeButton(btn, handler) {
 }
 function initSpotlightPanel() {
     bindChromeButton(dismissPanelBtn, async () => {
-        await window.bridge.panelDismiss();
+        await window.bridge.quitApp();
     });
     bindChromeButton(pinPanelBtn, async () => {
         panelPinned = !panelPinned;
@@ -156,8 +166,11 @@ async function updateQrCode() {
     }
 }
 async function updateStorageUsage() {
+    const requestId = ++storageUsageRequestId;
     try {
         const result = await window.bridge.getStorageUsage();
+        if (requestId !== storageUsageRequestId)
+            return;
         if (result?.ok &&
             typeof result.usedBytes === 'number' &&
             typeof result.limitBytes === 'number') {
@@ -178,6 +191,8 @@ async function updateStorageUsage() {
         }
     }
     catch (e) {
+        if (requestId !== storageUsageRequestId)
+            return;
         console.error('Storage query error:', e);
         storageContainer.classList.add('hidden');
     }
@@ -213,6 +228,9 @@ function loadSettings(state) {
         uiLanguageInput.value = state.language || 'system';
     }
     panelPinned = Boolean(state.panelPinned);
+    if (pillVisibilityInput) {
+        pillVisibilityInput.value = state.pillVisibility || 'always';
+    }
     updatePinUi();
     setPanelVisualMode('presented');
     updateAiProviderUi();
@@ -247,8 +265,13 @@ uiLanguageInput?.addEventListener('change', async () => {
     const state = await window.bridge.ready();
     loadSettings(state);
 });
+document.getElementById('quitApp')?.addEventListener('click', async () => {
+    await window.bridge.quitApp();
+});
 initSpotlightPanel();
-window.bridge.ready().then(loadSettings);
+window.bridge.ready().then((state) => {
+    loadSettings(state);
+});
 window.bridge.onStatus((message) => {
     showStatus(message);
 });
@@ -279,6 +302,7 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
         aiModel: aiModelInput?.value.trim() ?? '',
         aiBaseUrl: aiBaseUrlInput?.value.trim() ?? '',
         language: uiLanguageInput?.value || 'system',
+        pillVisibility: pillVisibilityInput?.value || 'always',
     };
     const result = await window.bridge.saveSettings(payload);
     if (result?.ok) {
@@ -339,3 +363,7 @@ document.getElementById('sendClipboard')?.addEventListener('click', async () => 
         showStatus(t('status.genericError', 'Hata: ') + e.message);
     }
 });
+// NOT: Bu dosya bilinçli olarak global script'tir (overlay.ts gibi) — `export {}`
+// eklemeyin! Modül yapmak tsc'ye CommonJS önsözü (`exports` referansı) yazdırır ve
+// script tarayıcıda "exports is not defined" ile ilk satırda ölür: hiçbir buton
+// çalışmaz. Üst düzey isimler pill-renderer.ts/overlay.ts ile çakışmamalıdır.

@@ -45,10 +45,16 @@ describe('getVirtualBounds', () => {
 });
 
 describe('toAbsoluteRect', () => {
-  it('offsets the rect by the virtual-desktop origin', () => {
+  it('offsets the rect by the overlay window origin', () => {
     expect(
       toAbsoluteRect({ x: 10, y: 20, width: 100, height: 50 }, { x: -1280, y: -200 })
     ).toEqual({ x: -1270, y: -180, width: 100, height: 50 });
+  });
+
+  it('places a display-local selection on a right-hand monitor', () => {
+    expect(
+      toAbsoluteRect({ x: 40, y: 30, width: 200, height: 100 }, { x: 1920, y: 0 })
+    ).toEqual({ x: 1960, y: 30, width: 200, height: 100 });
   });
 });
 

@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.stopOcrProcesses = stopOcrProcesses;
 exports.extractTextFromImage = extractTextFromImage;
 const electron_1 = require("electron");
 const child_process_1 = require("child_process");
@@ -41,6 +42,19 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const aiProviders_1 = require("./aiProviders");
 const OCR_PROMPT = 'Bu görseldeki TÜM metni olduğu gibi çıkar. Satır düzenini koru. Yorum veya açıklama ekleme; sadece ham metin döndür.';
+const OCR_PROCESS_TIMEOUT_MS = 45_000;
+const activeOcrProcesses = new Set();
+function stopOcrProcesses() {
+    for (const process of activeOcrProcesses) {
+        try {
+            process.kill();
+        }
+        catch {
+            // Process may already have exited.
+        }
+    }
+    activeOcrProcesses.clear();
+}
 function loadEmbeddedOcrScript() {
     const bundled = path.join(__dirname, '..', 'ocr.ps1');
     if (fs.existsSync(bundled)) {
@@ -92,17 +106,39 @@ function resolveOcrScriptPath() {
 function runProcess(command, args, label) {
     return new Promise((resolve, reject) => {
         const proc = (0, child_process_1.spawn)(command, args, { windowsHide: true });
+        activeOcrProcesses.add(proc);
         let stderr = '';
+        let settled = false;
+        const finish = (error) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            activeOcrProcesses.delete(proc);
+            if (error)
+                reject(error);
+            else
+                resolve();
+        };
+        const timeout = setTimeout(() => {
+            try {
+                proc.kill();
+            }
+            catch {
+                // Ignore a concurrent natural exit.
+            }
+            finish(new Error(`${label} ${OCR_PROCESS_TIMEOUT_MS / 1000} saniye içinde tamamlanmadı`));
+        }, OCR_PROCESS_TIMEOUT_MS);
         proc.stderr?.on('data', (chunk) => {
             stderr += chunk.toString('utf8');
         });
-        proc.on('error', reject);
+        proc.on('error', (error) => finish(error));
         proc.on('close', (code) => {
             if (code !== 0) {
-                reject(new Error(stderr.trim() || `${label} çıkış kodu ${code}`));
+                finish(new Error(stderr.trim() || `${label} çıkış kodu ${code}`));
                 return;
             }
-            resolve();
+            finish();
         });
     });
 }

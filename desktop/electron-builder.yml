@@ -20,8 +20,6 @@ extraResources:
     to: src/pill_hud.exe
   - from: src/round_window.exe
     to: src/round_window.exe
-  - from: src/ocr_helper.exe
-    to: src/ocr_helper.exe
   - from: src/ocr.ps1
     to: src/ocr.ps1
   - from: src/photo_dropper.exe
