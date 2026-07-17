@@ -101,7 +101,7 @@ describe('Gemini window controller', () => {
     expect(first.focused).toBe(2);
   });
 
-  it('hides a close request during normal operation but allows shutdown', () => {
+  it('hides a close request during normal operation but allows shutdown', async () => {
     // Given an active Gemini window
     const fixture = createFixture();
     const windowPromise = fixture.controller.ensureLoaded();
@@ -113,7 +113,7 @@ describe('Gemini window controller', () => {
     const shutdownPrevented = window.requestClose();
 
     // Then only the normal close is converted into a hide
-    expect(windowPromise).resolves.toBe(window);
+    await expect(windowPromise).resolves.toBe(window);
     expect(normalPrevented).toBe(true);
     expect(shutdownPrevented).toBe(false);
     expect(window.hidden).toBe(1);
