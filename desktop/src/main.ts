@@ -46,18 +46,16 @@ import {
   type SupabaseRuntimeContext,
 } from './main/supabaseRuntime';
 import { createElectronPhoneSyncState } from './main/phoneSyncState';
+import {
+  createElectronNotificationController,
+  type NotificationType,
+} from './main/notificationController';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
 let geminiWindow: BrowserWindow | null = null;
-let notificationWindow: BrowserWindow | null = null;
-let pendingNotification: { title: string; body: string; type: 'success' | 'info' | 'error' | 'sync' } | null = null;
-let notificationRendererReady = false;
-let notificationGeneration = 0;
-let notificationDismissTimer: NodeJS.Timeout | null = null;
-let notificationCloseTimer: NodeJS.Timeout | null = null;
 let selectionActive = false;
 let selectionStarting = false;
 let selectionHasAnnotations = false;
@@ -133,6 +131,7 @@ const supabaseRuntime = createSupabaseRuntime<SupabaseClient>(settings, {
   },
 });
 const phoneSyncState = createElectronPhoneSyncState();
+const notificationController = createElectronNotificationController(() => shutdownStarted);
 
 const PILL_MIN = { width: 220, height: 44 };
 const PILL_MAX = { width: 720, height: 80 };
@@ -221,9 +220,7 @@ function beginShutdown(): boolean {
   invalidateSelectionDragAsset();
   clearTransientPillTimer();
   transientPillActive = false;
-  notificationGeneration += 1;
-  pendingNotification = null;
-  clearNotificationTimers();
+  notificationController.shutdown();
   overlayLifecycle?.resolveRendererReady();
   stopNativePillHud();
   stopKeyListener();
@@ -2975,111 +2972,12 @@ ipcMain.handle('delete-downloaded-file', async (event, requestedPath: unknown) =
   return { ok: true };
 });
 
-function clearNotificationTimers(): void {
-  if (notificationDismissTimer) {
-    clearTimeout(notificationDismissTimer);
-    notificationDismissTimer = null;
-  }
-  if (notificationCloseTimer) {
-    clearTimeout(notificationCloseTimer);
-    notificationCloseTimer = null;
-  }
-}
-
-function displayNotification(win: BrowserWindow, generation: number, payload: { title: string; body: string; type: string }): void {
-  win.webContents.send('notification-data', payload);
-  
-  if (notificationDismissTimer) clearTimeout(notificationDismissTimer);
-  notificationDismissTimer = setTimeout(() => {
-    notificationDismissTimer = null;
-    if (notificationWindow === win && notificationGeneration === generation && !shutdownStarted) {
-      win.webContents.send('notification-dismiss');
-      
-      if (notificationCloseTimer) clearTimeout(notificationCloseTimer);
-      notificationCloseTimer = setTimeout(() => {
-        notificationCloseTimer = null;
-        if (notificationWindow === win && notificationGeneration === generation && !shutdownStarted) {
-          win.hide();
-        }
-      }, 500);
-    }
-  }, 3500);
-}
-
 function showCustomNotification(
   title: string,
   body: string,
-  type: 'success' | 'info' | 'error' | 'sync' = 'info'
+  type: NotificationType = 'info'
 ): void {
-  if (shutdownStarted) return;
-  
-  const payload = { title, body, type };
-  if (!notificationWindow || notificationWindow.isDestroyed()) {
-    pendingNotification = payload;
-    
-    const work = screen.getPrimaryDisplay().workArea;
-    const width = 360;
-    const height = 90;
-    
-    notificationWindow = new BrowserWindow({
-      x: work.x + work.width - width - 16,
-      y: work.y + 16,
-      width,
-      height,
-      frame: false,
-      transparent: true,
-      resizable: false,
-      movable: false,
-      focusable: false,
-      skipTaskbar: true,
-      alwaysOnTop: true,
-      hasShadow: false,
-      show: false,
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-      },
-    });
-    
-    notificationWindow.setAlwaysOnTop(true, 'screen-saver');
-    
-    const generation = ++notificationGeneration;
-    
-    notificationWindow.webContents.once('did-finish-load', () => {
-      notificationRendererReady = true;
-      if (notificationWindow === notificationWindow && notificationGeneration === generation && pendingNotification && !shutdownStarted) {
-        const toDisplay = pendingNotification;
-        pendingNotification = null;
-        notificationWindow!.show();
-        displayNotification(notificationWindow!, generation, toDisplay);
-      }
-    });
-    
-    notificationWindow.loadFile(path.join(app.getAppPath(), 'src', 'notification.html')).catch((err) => {
-      console.error('Failed to load notification file:', err);
-    });
-    
-    notificationWindow.on('closed', () => {
-      if (notificationWindow === notificationWindow) {
-        notificationWindow = null;
-        notificationRendererReady = false;
-      }
-    });
-    
-    return;
-  }
-  
-  const generation = ++notificationGeneration;
-  clearNotificationTimers();
-  
-  if (notificationRendererReady && !notificationWindow.isDestroyed() && !shutdownStarted) {
-    pendingNotification = null;
-    notificationWindow.show();
-    displayNotification(notificationWindow!, generation, payload);
-  } else {
-    pendingNotification = payload;
-  }
+  notificationController.show(title, body, type);
 }
 
 // ── Auto-updater ────────────────────────────────────────────────────────────
