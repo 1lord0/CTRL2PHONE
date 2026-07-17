@@ -4,7 +4,6 @@ import {
   clipboard,
   ipcMain,
   nativeImage,
-  safeStorage,
   screen,
   shell,
   Display,
@@ -41,6 +40,7 @@ import { activateSelectionOverlay } from './lib/overlayActivation';
 import { executeCopySelection, CopySelectionPorts } from './lib/copySelection';
 import { calculateDragPreviewSize, executeSelectionElectronDrag } from './lib/selectionElectronDrag';
 import { resolveApprovedDownloadedFile } from './lib/downloadedFileAccess';
+import { createDefaultSettings, createElectronSettingsStore } from './main/settingsStore';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
@@ -118,22 +118,8 @@ let mainWindowPageLoadGeneration = 0;
 let clipboardCheckInFlightGeneration: number | null = null;
 let _pillHudFallbackInFlight: Promise<void> | null = null;
 
-const settings: AppSettings = {
-  prompt: 'Bu ekran görüntüsünü analiz et ve kısa bir özet ver.',
-  supabaseUrl: '',
-  supabaseKey: '',
-  supabaseBucket: 'screenshots',
-  autoCopyFromPhone: true,
-  hotkeyVk: 0xa2, // Left Ctrl
-  doublePressMs: 400,
-  aiProvider: 'web',
-  aiApiKey: '',
-  aiModel: '',
-  aiBaseUrl: '',
-  language: 'system',
-  panelPinned: false,
-  pillVisibility: 'background',
-};
+const settings = createDefaultSettings();
+const settingsStore = createElectronSettingsStore(settings);
 
 const PILL_MIN = { width: 220, height: 44 };
 const PILL_MAX = { width: 720, height: 80 };
@@ -159,7 +145,6 @@ let mainWindowPage: 'pill' | 'panel' | 'none' = 'pill';
 
 const geminiUrl = 'https://gemini.google.com/app';
 
-let settingsPath: string | undefined;
 let phoneSyncInterval: NodeJS.Timeout | null = null;
 let phoneSyncChannel: RealtimeChannel | null = null;
 const PHONE_SYNC_STATE_MAX = 2000;
@@ -210,15 +195,6 @@ function stopClipboardPolling(): void {
     clearInterval(clipboardSyncInterval);
     clipboardSyncInterval = null;
   }
-}
-
-function hasSupabaseRuntimeChange(nextSettings: Partial<AppSettings>): boolean {
-  return (
-    (nextSettings.supabaseUrl ?? settings.supabaseUrl) !== settings.supabaseUrl ||
-    (nextSettings.supabaseKey ?? settings.supabaseKey) !== settings.supabaseKey ||
-    (nextSettings.supabaseBucket ?? settings.supabaseBucket) !== settings.supabaseBucket ||
-    (nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone) !== settings.autoCopyFromPhone
-  );
 }
 
 function invalidateSupabaseRuntime(): void {
@@ -724,72 +700,6 @@ function setupPhoneSyncPolling(): void {
   void checkPhoneSync();
 }
 
-function loadSettingsFromFile(): void {
-  try {
-    settingsPath = path.join(app.getPath('userData'), 'settings.json');
-    if (fs.existsSync(settingsPath)) {
-      const data = fs.readFileSync(settingsPath, 'utf8');
-      const loaded = JSON.parse(data) as Partial<AppSettings>;
-      Object.assign(settings, loaded);
-
-      // Decrypt the at-rest secrets (supabaseKey, aiApiKey) if safeStorage is available.
-      if (safeStorage.isEncryptionAvailable()) {
-        if (settings.supabaseKey) {
-          try {
-            settings.supabaseKey = safeStorage.decryptString(
-              Buffer.from(settings.supabaseKey, 'base64')
-            );
-          } catch (e) {
-            console.warn(
-              'Supabase key decryption failed, treating as plain text (backward compat):',
-              e
-            );
-            // If decryption fails, key might already be plain text (backward compat)
-          }
-        }
-        if (settings.aiApiKey) {
-          try {
-            settings.aiApiKey = safeStorage.decryptString(Buffer.from(settings.aiApiKey, 'base64'));
-          } catch (e) {
-            console.warn('AI key decryption failed, treating as plain text (backward compat):', e);
-          }
-        }
-      }
-
-      console.log('Ayarlar dosyadan yüklendi:', settingsPath);
-    } else {
-      console.log('Ayarlar dosyası bulunamadı, varsayılanlar kullanılacak.');
-    }
-  } catch (error) {
-    console.error('Ayarlar yüklenirken hata oluştu:', error);
-  }
-}
-
-function saveSettingsToFile(): void {
-  try {
-    if (!settingsPath) {
-      settingsPath = path.join(app.getPath('userData'), 'settings.json');
-    }
-
-    const settingsToSave = { ...settings };
-    if (safeStorage.isEncryptionAvailable()) {
-      if (settings.supabaseKey) {
-        settingsToSave.supabaseKey = safeStorage
-          .encryptString(settings.supabaseKey)
-          .toString('base64');
-      }
-      if (settings.aiApiKey) {
-        settingsToSave.aiApiKey = safeStorage.encryptString(settings.aiApiKey).toString('base64');
-      }
-    }
-
-    fs.writeFileSync(settingsPath, JSON.stringify(settingsToSave, null, 2), 'utf8');
-    console.log('Ayarlar dosyaya kaydedildi:', settingsPath);
-  } catch (error) {
-    console.error('Ayarlar kaydedilirken hata oluştu:', error);
-  }
-}
-
 function panelWindowSize(): { width: number; height: number } {
   const work = screen.getPrimaryDisplay().workArea;
   return {
@@ -1208,7 +1118,7 @@ function persistPanelPosition(): void {
   settings.panelX = bounds.x;
   settings.panelY = bounds.y;
   savedPillBounds = bounds;
-  saveSettingsToFile();
+  settingsStore.save();
 }
 
 function createMainWindow(): void {
@@ -1986,7 +1896,7 @@ function handlePillHudEvent(line: string): void {
     savedPillBounds = bounds;
     settings.panelX = bounds.x;
     settings.panelY = bounds.y;
-    saveSettingsToFile();
+    settingsStore.save();
     return;
   }
   if (line.startsWith('PILL_RESIZED:')) {
@@ -2004,7 +1914,7 @@ function handlePillHudEvent(line: string): void {
         });
         settings.panelX = savedPillBounds.x;
         settings.panelY = savedPillBounds.y;
-        saveSettingsToFile();
+        settingsStore.save();
         sendPillHudCommand(`POS:${savedPillBounds.x}:${savedPillBounds.y}`);
       }
     }
@@ -2470,37 +2380,17 @@ async function captureAndSendToSupabase(sessionId: number): Promise<boolean> {
 
 ipcMain.handle('save-settings', (_, nextSettings: Partial<AppSettings>) => {
   if (shutdownStarted) return { ok: false };
-  const hasDbChanges = hasSupabaseRuntimeChange(nextSettings);
-  
-  if (nextSettings.pillVisibility !== undefined) {
-    const nextVal = normalizePillVisibility(nextSettings.pillVisibility);
-    if (settings.pillVisibility !== nextVal) {
-      settings.pillVisibility = nextVal;
-      applyCompactPillVisibility();
-    }
+  const result = settingsStore.update(nextSettings);
+
+  if (result.pillVisibilityChanged) {
+    applyCompactPillVisibility();
   }
-
-  Object.assign(settings, {
-    prompt: nextSettings.prompt ?? settings.prompt,
-    supabaseUrl: nextSettings.supabaseUrl ?? settings.supabaseUrl,
-    supabaseKey: nextSettings.supabaseKey ?? settings.supabaseKey,
-    supabaseBucket: nextSettings.supabaseBucket ?? settings.supabaseBucket,
-    autoCopyFromPhone: nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone,
-    hotkeyVk: nextSettings.hotkeyVk ?? settings.hotkeyVk,
-    doublePressMs: nextSettings.doublePressMs ?? settings.doublePressMs,
-    aiProvider: nextSettings.aiProvider ?? settings.aiProvider,
-    aiApiKey: nextSettings.aiApiKey ?? settings.aiApiKey,
-    aiModel: nextSettings.aiModel ?? settings.aiModel,
-    aiBaseUrl: nextSettings.aiBaseUrl ?? settings.aiBaseUrl,
-    language: nextSettings.language ?? settings.language,
-  });
-
-  if (hasDbChanges) {
+  if (result.supabaseChanged) {
     invalidateSupabaseRuntime();
   }
 
   sendKeyListenerConfig();
-  saveSettingsToFile();
+  settingsStore.save();
   setupPhoneSyncPolling();
   setupClipboardPolling();
   
@@ -2876,7 +2766,7 @@ ipcMain.handle('panel-resize-compact', (_, size: { width?: number; height?: numb
 ipcMain.handle('panel-save-pinned', (_, pinned: boolean) => {
   if (shutdownStarted) return { ok: false };
   settings.panelPinned = Boolean(pinned);
-  saveSettingsToFile();
+  settingsStore.save();
   if (pinned) {
     presentSpotlight();
   } else {
@@ -3318,14 +3208,9 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
-    loadSettingsFromFile();
+    settingsStore.load();
     loadPhoneSyncState();
-    
-    // Migrate settings.pillVisibility if it is 'always'
-    if (settings.pillVisibility === 'always') {
-      settings.pillVisibility = 'background';
-      saveSettingsToFile();
-    }
+    settingsStore.migrateLegacyPillVisibility();
 
     createMainWindow();
     
