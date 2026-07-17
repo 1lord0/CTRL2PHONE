@@ -16,7 +16,7 @@ import { randomUUID } from 'crypto';
 import screenshot from 'screenshot-desktop';
 import { selectExternalCaptureDisplay } from './lib/screenCaptureSource';
 import QRCode from 'qrcode';
-import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { autoUpdater } from 'electron-updater';
 import { AppSettings, Rect } from './types';
 import {
@@ -55,6 +55,7 @@ import {
   parseMobileClipboardRow,
 } from './main/clipboardSyncController';
 import { createElectronGeminiWindowController } from './main/geminiWindowController';
+import { createPhoneFileSyncController } from './main/phoneFileSyncController';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
@@ -80,7 +81,6 @@ let nativeHudDisabledForRun = false;
 let pillHudReadyTimer: NodeJS.Timeout | null = null;
 const intentionallyStoppedPillHuds = new WeakSet<ChildProcess>();
 let shutdownStarted = false;
-let phoneSyncInFlightGeneration: number | null = null;
 let storagePurgeInFlightGeneration: number | null = null;
 let overlayLifecycle: {
   window: BrowserWindow;
@@ -130,10 +130,89 @@ const supabaseRuntime = createSupabaseRuntime<SupabaseClient>(settings, {
   onInvalidate: () => {
     stopPhoneSyncPolling();
     stopClipboardPolling();
-    phoneSyncInFlightGeneration = null;
   },
 });
 const phoneSyncState = createElectronPhoneSyncState();
+const phoneFileSyncController = createPhoneFileSyncController({
+  isEnabled: () => settings.autoCopyFromPhone,
+  getContext: () => getSupabaseContext(),
+  isContextCurrent: context => isSupabaseContextCurrent(context),
+  isSynced: (context, filePath, file) => phoneSyncState.isSynced(context, filePath, file),
+  markSynced: (context, filePath, file) => phoneSyncState.markSynced(context, filePath, file),
+  listRemoteFiles: async context => {
+    const { data, error } = await context.client.storage.from(context.bucket).list('to_pc', {
+      limit: 100,
+      sortBy: { column: 'created_at', order: 'desc' },
+    });
+    return {
+      files: (data ?? []).map(file => ({
+        name: file.name,
+        id: file.id,
+        updated_at: file.updated_at,
+      })),
+      error: error?.message ?? null,
+    };
+  },
+  downloadFile: async (context, file, batchIndex) => {
+    const remotePath = `to_pc/${file.name}`;
+    const { data: fileBlob, error } = await context.client.storage
+      .from(context.bucket)
+      .download(remotePath);
+    if (error) {
+      console.error(`Phone sync: failed to download ${remotePath}:`, error);
+      return null;
+    }
+    const arrayBuffer = await fileBlob.arrayBuffer();
+    if (!isSupabaseContextCurrent(context)) return null;
+    const buffer = Buffer.from(arrayBuffer);
+    const image = nativeImage.createFromBuffer(buffer);
+    if (image.isEmpty()) {
+      console.error('Phone sync: downloaded file is not a valid image (kept for retry)');
+      return null;
+    }
+    if (!isLocalClipboardGuarded()) clipboard.writeImage(image);
+    const extension = file.name.split('.').at(-1) || 'png';
+    const tempDir = path.join(app.getPath('temp'), 'ctrl2phone');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const localPath = path.join(tempDir, `phone_${Date.now()}_${batchIndex}.${extension}`);
+    fs.writeFileSync(localPath, buffer);
+    return localPath;
+  },
+  deleteRemoteFile: async (context, filePath) => {
+    if (!isSupabaseContextCurrent(context)) return null;
+    const { error } = await context.client.storage.from(context.bucket).remove([filePath]);
+    return error?.message ?? null;
+  },
+  notifyDownloads: paths => notifyPhoneDownloads([...paths]),
+  subscribe: (context, onFile, onSubscribed) => {
+    const channel = context.client
+      .channel(`ctrl2phone-to-pc-${context.generation}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'storage',
+          table: 'objects',
+          filter: `bucket_id=eq.${context.bucket}`,
+        },
+        (payload: { new?: { name?: string; id?: string; updated_at?: string } }) => {
+          const row = payload.new;
+          if (!row?.name) return;
+          onFile({ name: row.name, id: row.id, updated_at: row.updated_at });
+        }
+      )
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') onSubscribed();
+      });
+    return { client: context.client, channel };
+  },
+  removeSubscription: async subscription => {
+    await subscription.client.removeChannel(subscription.channel);
+  },
+  log: message => console.log(message),
+  warn: (message, detail) => console.warn(message, detail ?? ''),
+  error: (message, error) => console.error(message, error),
+});
 const notificationController = createElectronNotificationController(() => shutdownStarted);
 const geminiWindowController = createElectronGeminiWindowController(() => shutdownStarted);
 const clipboardSyncController = createClipboardSyncController({
@@ -195,10 +274,6 @@ let pillHudElevated = false;
 let mainWindowPage: 'pill' | 'panel' | 'none' = 'pill';
 
 
-let phoneSyncInterval: NodeJS.Timeout | null = null;
-let phoneSyncChannel: RealtimeChannel | null = null;
-const PHONE_SYNC_LIST_LIMIT = 100;
-const PHONE_SYNC_BATCH_LIMIT = 10;
 let ocrInFlight = false;
 
 function isWindowUsable(window: BrowserWindow | null | undefined): window is BrowserWindow {
@@ -222,18 +297,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 }
 
 function stopPhoneSyncPolling(): void {
-  if (phoneSyncInterval) {
-    clearInterval(phoneSyncInterval);
-    phoneSyncInterval = null;
-  }
-  const channel = phoneSyncChannel;
-  const channelClient = supabaseRuntime.currentClient();
-  phoneSyncChannel = null;
-  if (channel && channelClient) {
-    void channelClient.removeChannel(channel).catch((err) => {
-      console.warn('Phone sync channel teardown failed:', err);
-    });
-  }
+  phoneFileSyncController.stop();
 }
 
 function stopClipboardPolling(): void {
@@ -285,69 +349,6 @@ function isSupabaseContextCurrent(context: SupabaseContext): boolean {
   return supabaseRuntime.isCurrent(context);
 }
 
-function isValidPhoneFileName(name: string | null | undefined): name is string {
-  return Boolean(name && name !== '.keep' && !name.startsWith('.'));
-}
-
-async function tryDeleteRemotePhoneFile(
-  context: SupabaseContext,
-  filePath: string
-): Promise<void> {
-  if (!isSupabaseContextCurrent(context)) return;
-  const { error } = await context.client.storage.from(context.bucket).remove([filePath]);
-  if (error) {
-    console.warn(`Phone sync: remote delete failed for ${filePath}:`, error.message);
-  }
-}
-
-async function processPhoneFile(
-  context: SupabaseContext,
-  fileName: string,
-  batchIndex: number,
-  meta?: { id?: string | null; updated_at?: string | null }
-): Promise<string | null> {
-  const filePath = `to_pc/${fileName}`;
-  if (phoneSyncState.isSynced(context, filePath, meta)) {
-    return null;
-  }
-
-  const { data: fileBlob, error: downloadError } = await context.client.storage
-    .from(context.bucket)
-    .download(filePath);
-  if (downloadError) {
-    console.error(`Phone sync: failed to download ${filePath}:`, downloadError);
-    return null;
-  }
-
-  const arrayBuffer = await fileBlob.arrayBuffer();
-  if (!isSupabaseContextCurrent(context)) return null;
-
-  const buffer = Buffer.from(arrayBuffer);
-  const image = nativeImage.createFromBuffer(buffer);
-
-  if (image.isEmpty()) {
-    console.error('Phone sync: downloaded file is not a valid image (kept for retry)');
-    return null;
-  }
-
-  if (!isLocalClipboardGuarded()) {
-    clipboard.writeImage(image);
-  }
-
-  const parts = fileName.split('.');
-  const extension = parts[parts.length - 1] || 'png';
-  const tempDir = path.join(app.getPath('temp'), 'ctrl2phone');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  const localFilePath = path.join(tempDir, `phone_${Date.now()}_${batchIndex}.${extension}`);
-  fs.writeFileSync(localFilePath, buffer);
-
-  phoneSyncState.markSynced(context, filePath, meta);
-  await tryDeleteRemotePhoneFile(context, filePath);
-  return localFilePath;
-}
-
 function broadcastPhoneDownloads(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const filesList = downloadedPhoneFiles.map(filePath => {
@@ -387,163 +388,8 @@ function notifyPhoneDownloads(downloadedLocalPaths: string[]): void {
   );
 }
 
-async function cleanupSyncedRemotePhoneFiles(
-  context: SupabaseContext,
-  files: { name?: string | null; id?: string | null; updated_at?: string | null }[]
-): Promise<void> {
-  for (const file of files) {
-    if (!isSupabaseContextCurrent(context)) return;
-    if (!isValidPhoneFileName(file.name)) continue;
-    const filePath = `to_pc/${file.name}`;
-    if (phoneSyncState.isSynced(context, filePath, file)) {
-      await tryDeleteRemotePhoneFile(context, filePath);
-    }
-  }
-}
-
-async function syncPhoneFileByPath(
-  filePath: string,
-  meta?: { id?: string | null; updated_at?: string | null }
-): Promise<void> {
-  const context = getSupabaseContext();
-  if (!context) return;
-  if (!filePath.startsWith('to_pc/')) return;
-
-  const fileName = filePath.slice('to_pc/'.length);
-  if (!isValidPhoneFileName(fileName)) return;
-  if (phoneSyncState.isSynced(context, filePath, meta)) {
-    await tryDeleteRemotePhoneFile(context, filePath);
-    return;
-  }
-  if (phoneSyncInFlightGeneration === context.generation) return;
-
-  phoneSyncInFlightGeneration = context.generation;
-  try {
-    const localPath = await processPhoneFile(context, fileName, 0, meta);
-    if (localPath && isSupabaseContextCurrent(context)) {
-      notifyPhoneDownloads([localPath]);
-    }
-  } catch (err) {
-    console.error('Error in syncPhoneFileByPath:', err);
-  } finally {
-    if (phoneSyncInFlightGeneration === context.generation) {
-      phoneSyncInFlightGeneration = null;
-    }
-  }
-}
-
-async function checkPhoneSync(): Promise<void> {
-  if (!settings.autoCopyFromPhone) {
-    return;
-  }
-
-  const context = getSupabaseContext();
-  if (!context) return;
-
-  if (phoneSyncInFlightGeneration === context.generation) {
-    return;
-  }
-  phoneSyncInFlightGeneration = context.generation;
-
-  try {
-    const { data: files, error } = await context.client.storage.from(context.bucket).list('to_pc', {
-      limit: PHONE_SYNC_LIST_LIMIT,
-      sortBy: { column: 'created_at', order: 'desc' },
-    });
-
-    if (error) {
-      console.warn('Phone sync list error:', error.message);
-      return;
-    }
-
-    if (!isSupabaseContextCurrent(context)) return;
-
-    if (!files || files.length === 0) {
-      return;
-    }
-
-    const pending = files.filter((file) => {
-      if (!isValidPhoneFileName(file.name)) return false;
-      return !phoneSyncState.isSynced(context, `to_pc/${file.name}`, file);
-    });
-
-    if (pending.length === 0) {
-      await cleanupSyncedRemotePhoneFiles(context, files);
-      return;
-    }
-
-    const downloadedLocalPaths: string[] = [];
-    const batch = pending.slice(0, PHONE_SYNC_BATCH_LIMIT);
-
-    for (let i = 0; i < batch.length; i++) {
-      const file = batch[i];
-      if (!isSupabaseContextCurrent(context)) return;
-      if (!isValidPhoneFileName(file.name)) continue;
-      const localPath = await processPhoneFile(context, file.name, i, file);
-      if (localPath) {
-        downloadedLocalPaths.push(localPath);
-      }
-    }
-
-    if (isSupabaseContextCurrent(context)) {
-      notifyPhoneDownloads(downloadedLocalPaths);
-    }
-  } catch (err: any) {
-    console.error('Error in checkPhoneSync:', err);
-  } finally {
-    if (phoneSyncInFlightGeneration === context.generation) {
-      phoneSyncInFlightGeneration = null;
-    }
-  }
-}
-
 function setupPhoneSyncPolling(): void {
-  stopPhoneSyncPolling();
-
-  if (!settings.autoCopyFromPhone) {
-    console.log('Phone sync: disabled by settings');
-    return;
-  }
-
-  const context = getSupabaseContext();
-  if (!context) {
-    console.log('Phone sync: waiting for Supabase settings');
-    return;
-  }
-
-  const { client, bucket, generation } = context;
-
-  // Realtime push: react instantly when the phone uploads into to_pc/. Requires
-  // the one-time setup SQL (storage.objects in the realtime publication + anon
-  // SELECT policy). If unavailable, the slow fallback poll below still works.
-  phoneSyncChannel = client
-    .channel(`ctrl2phone-to-pc-${generation}`)
-    .on(
-      'postgres_changes',
-      // bucket_id == bucket name for user-created Supabase buckets.
-      { event: 'INSERT', schema: 'storage', table: 'objects', filter: `bucket_id=eq.${bucket}` },
-      (payload: { new?: { name?: string; id?: string; updated_at?: string } }) => {
-        if (!isSupabaseContextCurrent(context)) return;
-        const row = payload?.new;
-        const name = row?.name ?? '';
-        if (name.startsWith('to_pc/')) {
-          void syncPhoneFileByPath(name, row);
-        }
-      }
-    )
-    .subscribe((status: string) => {
-      if (status === 'SUBSCRIBED' && isSupabaseContextCurrent(context)) {
-        // Catch anything that arrived while we were disconnected.
-        void checkPhoneSync();
-      }
-    });
-
-  // Safety-net poll, far slower than the old 4s, so sync still works even when
-  // Realtime is unavailable or the publication was not enabled.
-  phoneSyncInterval = setInterval(checkPhoneSync, 15000);
-
-  console.log('Phone sync: realtime + 15s fallback initialized');
-  void checkPhoneSync();
+  phoneFileSyncController.setup();
 }
 
 function panelWindowSize(): { width: number; height: number } {
