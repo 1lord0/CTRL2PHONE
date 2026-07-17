@@ -45,6 +45,7 @@ import {
   createSupabaseRuntime,
   type SupabaseRuntimeContext,
 } from './main/supabaseRuntime';
+import { createElectronPhoneSyncState } from './main/phoneSyncState';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
@@ -131,6 +132,7 @@ const supabaseRuntime = createSupabaseRuntime<SupabaseClient>(settings, {
     phoneSyncInFlightGeneration = null;
   },
 });
+const phoneSyncState = createElectronPhoneSyncState();
 
 const PILL_MIN = { width: 220, height: 44 };
 const PILL_MAX = { width: 720, height: 80 };
@@ -158,10 +160,8 @@ const geminiUrl = 'https://gemini.google.com/app';
 
 let phoneSyncInterval: NodeJS.Timeout | null = null;
 let phoneSyncChannel: RealtimeChannel | null = null;
-const PHONE_SYNC_STATE_MAX = 2000;
 const PHONE_SYNC_LIST_LIMIT = 100;
 const PHONE_SYNC_BATCH_LIMIT = 10;
-let phoneSyncedPaths = new Set<string>();
 let clipboardSyncInterval: NodeJS.Timeout | null = null;
 let lastProcessedClipboardId: string | null = null;
 let ocrInFlight = false;
@@ -351,63 +351,6 @@ function isSupabaseContextCurrent(context: SupabaseContext): boolean {
   return supabaseRuntime.isCurrent(context);
 }
 
-function getPhoneSyncStatePath(): string {
-  return path.join(app.getPath('userData'), 'phone-sync-state.json');
-}
-
-function loadPhoneSyncState(): void {
-  try {
-    const statePath = getPhoneSyncStatePath();
-    if (!fs.existsSync(statePath)) {
-      phoneSyncedPaths = new Set();
-      return;
-    }
-    const data = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { synced?: string[] };
-    phoneSyncedPaths = new Set(Array.isArray(data.synced) ? data.synced : []);
-  } catch (err) {
-    console.warn('Phone sync state load failed, starting fresh:', err);
-    phoneSyncedPaths = new Set();
-  }
-}
-
-function savePhoneSyncState(): void {
-  try {
-    const synced = [...phoneSyncedPaths].slice(-PHONE_SYNC_STATE_MAX);
-    phoneSyncedPaths = new Set(synced);
-    fs.writeFileSync(getPhoneSyncStatePath(), JSON.stringify({ synced }, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Phone sync state save failed:', err);
-  }
-}
-
-function makePhoneSyncKey(
-  context: SupabaseContext,
-  filePath: string,
-  meta?: { id?: string | null; updated_at?: string | null }
-): string {
-  const namespace = `${context.url}|${context.bucket}`;
-  if (meta?.id) return `${namespace}|id:${meta.id}`;
-  if (meta?.updated_at) return `${namespace}|${filePath}@${meta.updated_at}`;
-  return `${namespace}|${filePath}`;
-}
-
-function isPhoneFileSynced(
-  context: SupabaseContext,
-  filePath: string,
-  meta?: { id?: string | null; updated_at?: string | null }
-): boolean {
-  return phoneSyncedPaths.has(makePhoneSyncKey(context, filePath, meta));
-}
-
-function markPhoneFileSynced(
-  context: SupabaseContext,
-  filePath: string,
-  meta?: { id?: string | null; updated_at?: string | null }
-): void {
-  phoneSyncedPaths.add(makePhoneSyncKey(context, filePath, meta));
-  savePhoneSyncState();
-}
-
 function isValidPhoneFileName(name: string | null | undefined): name is string {
   return Boolean(name && name !== '.keep' && !name.startsWith('.'));
 }
@@ -430,7 +373,7 @@ async function processPhoneFile(
   meta?: { id?: string | null; updated_at?: string | null }
 ): Promise<string | null> {
   const filePath = `to_pc/${fileName}`;
-  if (isPhoneFileSynced(context, filePath, meta)) {
+  if (phoneSyncState.isSynced(context, filePath, meta)) {
     return null;
   }
 
@@ -466,7 +409,7 @@ async function processPhoneFile(
   const localFilePath = path.join(tempDir, `phone_${Date.now()}_${batchIndex}.${extension}`);
   fs.writeFileSync(localFilePath, buffer);
 
-  markPhoneFileSynced(context, filePath, meta);
+  phoneSyncState.markSynced(context, filePath, meta);
   await tryDeleteRemotePhoneFile(context, filePath);
   return localFilePath;
 }
@@ -518,7 +461,7 @@ async function cleanupSyncedRemotePhoneFiles(
     if (!isSupabaseContextCurrent(context)) return;
     if (!isValidPhoneFileName(file.name)) continue;
     const filePath = `to_pc/${file.name}`;
-    if (isPhoneFileSynced(context, filePath, file)) {
+    if (phoneSyncState.isSynced(context, filePath, file)) {
       await tryDeleteRemotePhoneFile(context, filePath);
     }
   }
@@ -534,7 +477,7 @@ async function syncPhoneFileByPath(
 
   const fileName = filePath.slice('to_pc/'.length);
   if (!isValidPhoneFileName(fileName)) return;
-  if (isPhoneFileSynced(context, filePath, meta)) {
+  if (phoneSyncState.isSynced(context, filePath, meta)) {
     await tryDeleteRemotePhoneFile(context, filePath);
     return;
   }
@@ -587,7 +530,7 @@ async function checkPhoneSync(): Promise<void> {
 
     const pending = files.filter((file) => {
       if (!isValidPhoneFileName(file.name)) return false;
-      return !isPhoneFileSynced(context, `to_pc/${file.name}`, file);
+      return !phoneSyncState.isSynced(context, `to_pc/${file.name}`, file);
     });
 
     if (pending.length === 0) {
@@ -3178,7 +3121,7 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     settingsStore.load();
-    loadPhoneSyncState();
+    phoneSyncState.load();
     settingsStore.migrateLegacyPillVisibility();
 
     createMainWindow();
