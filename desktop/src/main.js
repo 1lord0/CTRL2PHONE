@@ -58,16 +58,15 @@ const overlayActivation_1 = require("./lib/overlayActivation");
 const copySelection_1 = require("./lib/copySelection");
 const selectionElectronDrag_1 = require("./lib/selectionElectronDrag");
 const downloadedFileAccess_1 = require("./lib/downloadedFileAccess");
+const settingsStore_1 = require("./main/settingsStore");
+const supabaseRuntime_1 = require("./main/supabaseRuntime");
+const phoneSyncState_1 = require("./main/phoneSyncState");
+const notificationController_1 = require("./main/notificationController");
+const clipboardSyncController_1 = require("./main/clipboardSyncController");
+const geminiWindowController_1 = require("./main/geminiWindowController");
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 let mainWindow = null;
 let overlayWindow = null;
-let geminiWindow = null;
-let notificationWindow = null;
-let pendingNotification = null;
-let notificationRendererReady = false;
-let notificationGeneration = 0;
-let notificationDismissTimer = null;
-let notificationCloseTimer = null;
 let selectionActive = false;
 let selectionStarting = false;
 let selectionHasAnnotations = false;
@@ -88,10 +87,6 @@ let nativeHudDisabledForRun = false;
 let pillHudReadyTimer = null;
 const intentionallyStoppedPillHuds = new WeakSet();
 let shutdownStarted = false;
-let supabaseClient = null;
-let supabaseClientUrl = '';
-let supabaseClientKey = '';
-let supabaseConfigGeneration = 0;
 let phoneSyncInFlightGeneration = null;
 let storagePurgeInFlightGeneration = null;
 let overlayLifecycle = null;
@@ -112,24 +107,58 @@ let transientPillActive = false;
 let transientPillTimer = null;
 let mainWindowPageLoad = null;
 let mainWindowPageLoadGeneration = 0;
-let clipboardCheckInFlightGeneration = null;
 let _pillHudFallbackInFlight = null;
-const settings = {
-    prompt: 'Bu ekran görüntüsünü analiz et ve kısa bir özet ver.',
-    supabaseUrl: '',
-    supabaseKey: '',
-    supabaseBucket: 'screenshots',
-    autoCopyFromPhone: true,
-    hotkeyVk: 0xa2, // Left Ctrl
-    doublePressMs: 400,
-    aiProvider: 'web',
-    aiApiKey: '',
-    aiModel: '',
-    aiBaseUrl: '',
-    language: 'system',
-    panelPinned: false,
-    pillVisibility: 'background',
-};
+const settings = (0, settingsStore_1.createDefaultSettings)();
+const settingsStore = (0, settingsStore_1.createElectronSettingsStore)(settings);
+const supabaseRuntime = (0, supabaseRuntime_1.createSupabaseRuntime)(settings, {
+    createClient: (url, key) => (0, supabase_js_1.createClient)(url, key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+    }),
+    onInvalidate: () => {
+        stopPhoneSyncPolling();
+        stopClipboardPolling();
+        phoneSyncInFlightGeneration = null;
+    },
+});
+const phoneSyncState = (0, phoneSyncState_1.createElectronPhoneSyncState)();
+const notificationController = (0, notificationController_1.createElectronNotificationController)(() => shutdownStarted);
+const geminiWindowController = (0, geminiWindowController_1.createElectronGeminiWindowController)(() => shutdownStarted);
+const clipboardSyncController = (0, clipboardSyncController_1.createClipboardSyncController)({
+    readClipboard: () => electron_1.clipboard.readText(),
+    writeClipboard: value => electron_1.clipboard.writeText(value),
+    isClipboardGuarded: () => (0, clipboardWrite_1.isLocalClipboardGuarded)(),
+    getContext: () => getSupabaseContext(),
+    isContextCurrent: context => isSupabaseContextCurrent(context),
+    insertDesktopText: async (context, text) => {
+        const { error } = await context.client.from('clipboard_sync').insert({
+            content: text,
+            source: 'desktop',
+        });
+        return error?.message ?? null;
+    },
+    fetchOldestMobileText: async (context) => {
+        const { data, error } = await context.client
+            .from('clipboard_sync')
+            .select('*')
+            .eq('source', 'mobile')
+            .order('created_at', { ascending: true })
+            .limit(1);
+        return {
+            row: (0, clipboardSyncController_1.parseMobileClipboardRow)(data?.[0]),
+            error: error?.message ?? null,
+        };
+    },
+    deleteMobileText: async (context, id) => {
+        const { error } = await context.client.from('clipboard_sync').delete().eq('id', id);
+        return error?.message ?? null;
+    },
+    setStatus,
+    setResponse,
+    showNotification: (title, body) => showCustomNotification(title, body, 'sync'),
+    log: message => console.log(message),
+    warn: (message, detail) => console.warn(message, detail ?? ''),
+    error: (message, error) => console.error(message, error),
+});
 const PILL_MIN = { width: 220, height: 44 };
 const PILL_MAX = { width: 720, height: 80 };
 const PILL_DEFAULT = { width: 320, height: 52 };
@@ -149,16 +178,10 @@ let panelMode = 'compact';
 let savedPillBounds = null;
 let pillHudElevated = false;
 let mainWindowPage = 'pill';
-const geminiUrl = 'https://gemini.google.com/app';
-let settingsPath;
 let phoneSyncInterval = null;
 let phoneSyncChannel = null;
-const PHONE_SYNC_STATE_MAX = 2000;
 const PHONE_SYNC_LIST_LIMIT = 100;
 const PHONE_SYNC_BATCH_LIMIT = 10;
-let phoneSyncedPaths = new Set();
-let clipboardSyncInterval = null;
-let lastProcessedClipboardId = null;
 let ocrInFlight = false;
 function isWindowUsable(window) {
     return Boolean(window && !window.isDestroyed() && !window.webContents.isDestroyed());
@@ -181,7 +204,7 @@ function stopPhoneSyncPolling() {
         phoneSyncInterval = null;
     }
     const channel = phoneSyncChannel;
-    const channelClient = supabaseClient;
+    const channelClient = supabaseRuntime.currentClient();
     phoneSyncChannel = null;
     if (channel && channelClient) {
         void channelClient.removeChannel(channel).catch((err) => {
@@ -190,25 +213,7 @@ function stopPhoneSyncPolling() {
     }
 }
 function stopClipboardPolling() {
-    if (clipboardSyncInterval) {
-        clearInterval(clipboardSyncInterval);
-        clipboardSyncInterval = null;
-    }
-}
-function hasSupabaseRuntimeChange(nextSettings) {
-    return ((nextSettings.supabaseUrl ?? settings.supabaseUrl) !== settings.supabaseUrl ||
-        (nextSettings.supabaseKey ?? settings.supabaseKey) !== settings.supabaseKey ||
-        (nextSettings.supabaseBucket ?? settings.supabaseBucket) !== settings.supabaseBucket ||
-        (nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone) !== settings.autoCopyFromPhone);
-}
-function invalidateSupabaseRuntime() {
-    stopPhoneSyncPolling();
-    stopClipboardPolling();
-    supabaseConfigGeneration += 1;
-    phoneSyncInFlightGeneration = null;
-    supabaseClient = null;
-    supabaseClientUrl = '';
-    supabaseClientKey = '';
+    clipboardSyncController.stopPolling();
 }
 function beginShutdown() {
     if (shutdownStarted)
@@ -224,9 +229,7 @@ function beginShutdown() {
     invalidateSelectionDragAsset();
     clearTransientPillTimer();
     transientPillActive = false;
-    notificationGeneration += 1;
-    pendingNotification = null;
-    clearNotificationTimers();
+    notificationController.shutdown();
     overlayLifecycle?.resolveRendererReady();
     stopNativePillHud();
     stopKeyListener();
@@ -239,176 +242,16 @@ function quitApplication() {
     electron_1.app.quit();
 }
 async function sendClipboardToPhone() {
-    const text = electron_1.clipboard.readText();
-    if (!text || !text.trim()) {
-        setStatus('Panoda kopyalanmış metin bulunamadı');
-        return { ok: false, error: 'Panoda metin yok' };
-    }
-    const context = getSupabaseContext();
-    if (!context) {
-        setStatus('Supabase ayarları eksik!');
-        return { ok: false, error: 'Supabase ayarları eksik' };
-    }
-    const { client } = context;
-    try {
-        const { error } = await client.from('clipboard_sync').insert({
-            content: text.trim(),
-            source: 'desktop',
-        });
-        if (error)
-            throw new Error(error.message);
-        if (!isSupabaseContextCurrent(context)) {
-            return { ok: false, error: 'Supabase ayarları gönderim sırasında değişti' };
-        }
-        const preview = text.trim().length > 60 ? text.trim().substring(0, 60) + '...' : text.trim();
-        showCustomNotification('Metin Telefona Gönderildi', preview, 'sync');
-        setStatus('Pano metni telefona gönderildi');
-        setResponse(`Gönderilen metin: ${text.trim().substring(0, 200)}`);
-        return { ok: true };
-    }
-    catch (err) {
-        console.error('Clipboard send error:', err);
-        setStatus('Metin gönderme hatası: ' + err.message);
-        return { ok: false, error: err.message };
-    }
-}
-async function checkClipboardFromMobile() {
-    // Don't stomp a fresh local OCR / RLS copy with a stale mobile row.
-    if ((0, clipboardWrite_1.isLocalClipboardGuarded)())
-        return;
-    const context = getSupabaseContext();
-    if (!context)
-        return;
-    if (clipboardCheckInFlightGeneration === context.generation)
-        return;
-    const { client } = context;
-    clipboardCheckInFlightGeneration = context.generation;
-    try {
-        const { data, error } = await client
-            .from('clipboard_sync')
-            .select('*')
-            .eq('source', 'mobile')
-            .order('created_at', { ascending: true })
-            .limit(1);
-        if (error) {
-            console.warn('Clipboard poll error:', error.message);
-            return;
-        }
-        if (!isSupabaseContextCurrent(context) || (0, clipboardWrite_1.isLocalClipboardGuarded)()) {
-            return;
-        }
-        if (data && data.length > 0) {
-            const row = data[0];
-            if (row.id !== lastProcessedClipboardId) {
-                lastProcessedClipboardId = row.id;
-                const content = row.content;
-                if (content) {
-                    electron_1.clipboard.writeText(content);
-                    const preview = content.length > 60 ? content.substring(0, 60) + '...' : content;
-                    showCustomNotification('Telefondan Metin Alındı', preview, 'sync');
-                    setStatus('Telefondan metin alındı');
-                    setResponse(`Alınan metin: ${content.substring(0, 200)}`);
-                }
-            }
-            // Always try to delete the record from database to keep it clean
-            const { error: deleteError } = await client.from('clipboard_sync').delete().eq('id', row.id);
-            if (deleteError) {
-                console.warn('Clipboard row cleanup failed:', deleteError.message);
-            }
-        }
-    }
-    catch (err) {
-        console.error('checkClipboardFromMobile error:', err);
-    }
-    finally {
-        if (clipboardCheckInFlightGeneration === context.generation) {
-            clipboardCheckInFlightGeneration = null;
-        }
-    }
+    return await clipboardSyncController.sendToPhone();
 }
 function setupClipboardPolling() {
-    stopClipboardPolling();
-    const context = getSupabaseContext();
-    if (!context) {
-        console.log('Clipboard polling: waiting for Supabase settings');
-        return;
-    }
-    clipboardSyncInterval = setInterval(checkClipboardFromMobile, 1500);
-    console.log('Clipboard polling initialized (1.5s)');
-}
-// Lazily (re)create the Supabase client when settings are present. Returns null
-// if Supabase is not configured yet.
-function ensureSupabaseClient() {
-    if (!settings.supabaseUrl || !settings.supabaseKey) {
-        return null;
-    }
-    if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl || supabaseClientKey !== settings.supabaseKey) {
-        supabaseClient = (0, supabase_js_1.createClient)(settings.supabaseUrl, settings.supabaseKey, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
-        supabaseClientUrl = settings.supabaseUrl;
-        supabaseClientKey = settings.supabaseKey;
-    }
-    return supabaseClient;
+    clipboardSyncController.setupPolling();
 }
 function getSupabaseContext() {
-    const client = ensureSupabaseClient();
-    if (!client)
-        return null;
-    return {
-        client,
-        url: settings.supabaseUrl,
-        bucket: settings.supabaseBucket || 'screenshots',
-        generation: supabaseConfigGeneration,
-    };
+    return supabaseRuntime.getContext();
 }
 function isSupabaseContextCurrent(context) {
-    return (context.generation === supabaseConfigGeneration &&
-        context.client === supabaseClient &&
-        context.bucket === (settings.supabaseBucket || 'screenshots'));
-}
-function getPhoneSyncStatePath() {
-    return path.join(electron_1.app.getPath('userData'), 'phone-sync-state.json');
-}
-function loadPhoneSyncState() {
-    try {
-        const statePath = getPhoneSyncStatePath();
-        if (!fs.existsSync(statePath)) {
-            phoneSyncedPaths = new Set();
-            return;
-        }
-        const data = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-        phoneSyncedPaths = new Set(Array.isArray(data.synced) ? data.synced : []);
-    }
-    catch (err) {
-        console.warn('Phone sync state load failed, starting fresh:', err);
-        phoneSyncedPaths = new Set();
-    }
-}
-function savePhoneSyncState() {
-    try {
-        const synced = [...phoneSyncedPaths].slice(-PHONE_SYNC_STATE_MAX);
-        phoneSyncedPaths = new Set(synced);
-        fs.writeFileSync(getPhoneSyncStatePath(), JSON.stringify({ synced }, null, 2), 'utf8');
-    }
-    catch (err) {
-        console.error('Phone sync state save failed:', err);
-    }
-}
-function makePhoneSyncKey(context, filePath, meta) {
-    const namespace = `${context.url}|${context.bucket}`;
-    if (meta?.id)
-        return `${namespace}|id:${meta.id}`;
-    if (meta?.updated_at)
-        return `${namespace}|${filePath}@${meta.updated_at}`;
-    return `${namespace}|${filePath}`;
-}
-function isPhoneFileSynced(context, filePath, meta) {
-    return phoneSyncedPaths.has(makePhoneSyncKey(context, filePath, meta));
-}
-function markPhoneFileSynced(context, filePath, meta) {
-    phoneSyncedPaths.add(makePhoneSyncKey(context, filePath, meta));
-    savePhoneSyncState();
+    return supabaseRuntime.isCurrent(context);
 }
 function isValidPhoneFileName(name) {
     return Boolean(name && name !== '.keep' && !name.startsWith('.'));
@@ -423,7 +266,7 @@ async function tryDeleteRemotePhoneFile(context, filePath) {
 }
 async function processPhoneFile(context, fileName, batchIndex, meta) {
     const filePath = `to_pc/${fileName}`;
-    if (isPhoneFileSynced(context, filePath, meta)) {
+    if (phoneSyncState.isSynced(context, filePath, meta)) {
         return null;
     }
     const { data: fileBlob, error: downloadError } = await context.client.storage
@@ -453,7 +296,7 @@ async function processPhoneFile(context, fileName, batchIndex, meta) {
     }
     const localFilePath = path.join(tempDir, `phone_${Date.now()}_${batchIndex}.${extension}`);
     fs.writeFileSync(localFilePath, buffer);
-    markPhoneFileSynced(context, filePath, meta);
+    phoneSyncState.markSynced(context, filePath, meta);
     await tryDeleteRemotePhoneFile(context, filePath);
     return localFilePath;
 }
@@ -495,7 +338,7 @@ async function cleanupSyncedRemotePhoneFiles(context, files) {
         if (!isValidPhoneFileName(file.name))
             continue;
         const filePath = `to_pc/${file.name}`;
-        if (isPhoneFileSynced(context, filePath, file)) {
+        if (phoneSyncState.isSynced(context, filePath, file)) {
             await tryDeleteRemotePhoneFile(context, filePath);
         }
     }
@@ -509,7 +352,7 @@ async function syncPhoneFileByPath(filePath, meta) {
     const fileName = filePath.slice('to_pc/'.length);
     if (!isValidPhoneFileName(fileName))
         return;
-    if (isPhoneFileSynced(context, filePath, meta)) {
+    if (phoneSyncState.isSynced(context, filePath, meta)) {
         await tryDeleteRemotePhoneFile(context, filePath);
         return;
     }
@@ -559,7 +402,7 @@ async function checkPhoneSync() {
         const pending = files.filter((file) => {
             if (!isValidPhoneFileName(file.name))
                 return false;
-            return !isPhoneFileSynced(context, `to_pc/${file.name}`, file);
+            return !phoneSyncState.isSynced(context, `to_pc/${file.name}`, file);
         });
         if (pending.length === 0) {
             await cleanupSyncedRemotePhoneFiles(context, files);
@@ -611,7 +454,7 @@ function setupPhoneSyncPolling() {
         .on('postgres_changes', 
     // bucket_id == bucket name for user-created Supabase buckets.
     { event: 'INSERT', schema: 'storage', table: 'objects', filter: `bucket_id=eq.${bucket}` }, (payload) => {
-        if (generation !== supabaseConfigGeneration || !isSupabaseContextCurrent(context))
+        if (!isSupabaseContextCurrent(context))
             return;
         const row = payload?.new;
         const name = row?.name ?? '';
@@ -630,66 +473,6 @@ function setupPhoneSyncPolling() {
     phoneSyncInterval = setInterval(checkPhoneSync, 15000);
     console.log('Phone sync: realtime + 15s fallback initialized');
     void checkPhoneSync();
-}
-function loadSettingsFromFile() {
-    try {
-        settingsPath = path.join(electron_1.app.getPath('userData'), 'settings.json');
-        if (fs.existsSync(settingsPath)) {
-            const data = fs.readFileSync(settingsPath, 'utf8');
-            const loaded = JSON.parse(data);
-            Object.assign(settings, loaded);
-            // Decrypt the at-rest secrets (supabaseKey, aiApiKey) if safeStorage is available.
-            if (electron_1.safeStorage.isEncryptionAvailable()) {
-                if (settings.supabaseKey) {
-                    try {
-                        settings.supabaseKey = electron_1.safeStorage.decryptString(Buffer.from(settings.supabaseKey, 'base64'));
-                    }
-                    catch (e) {
-                        console.warn('Supabase key decryption failed, treating as plain text (backward compat):', e);
-                        // If decryption fails, key might already be plain text (backward compat)
-                    }
-                }
-                if (settings.aiApiKey) {
-                    try {
-                        settings.aiApiKey = electron_1.safeStorage.decryptString(Buffer.from(settings.aiApiKey, 'base64'));
-                    }
-                    catch (e) {
-                        console.warn('AI key decryption failed, treating as plain text (backward compat):', e);
-                    }
-                }
-            }
-            console.log('Ayarlar dosyadan yüklendi:', settingsPath);
-        }
-        else {
-            console.log('Ayarlar dosyası bulunamadı, varsayılanlar kullanılacak.');
-        }
-    }
-    catch (error) {
-        console.error('Ayarlar yüklenirken hata oluştu:', error);
-    }
-}
-function saveSettingsToFile() {
-    try {
-        if (!settingsPath) {
-            settingsPath = path.join(electron_1.app.getPath('userData'), 'settings.json');
-        }
-        const settingsToSave = { ...settings };
-        if (electron_1.safeStorage.isEncryptionAvailable()) {
-            if (settings.supabaseKey) {
-                settingsToSave.supabaseKey = electron_1.safeStorage
-                    .encryptString(settings.supabaseKey)
-                    .toString('base64');
-            }
-            if (settings.aiApiKey) {
-                settingsToSave.aiApiKey = electron_1.safeStorage.encryptString(settings.aiApiKey).toString('base64');
-            }
-        }
-        fs.writeFileSync(settingsPath, JSON.stringify(settingsToSave, null, 2), 'utf8');
-        console.log('Ayarlar dosyaya kaydedildi:', settingsPath);
-    }
-    catch (error) {
-        console.error('Ayarlar kaydedilirken hata oluştu:', error);
-    }
 }
 function panelWindowSize() {
     const work = electron_1.screen.getPrimaryDisplay().workArea;
@@ -1090,7 +873,7 @@ function persistPanelPosition() {
     settings.panelX = bounds.x;
     settings.panelY = bounds.y;
     savedPillBounds = bounds;
-    saveSettingsToFile();
+    settingsStore.save();
 }
 function createMainWindow() {
     useNativePillHud = resolveNativePillHud();
@@ -1257,79 +1040,6 @@ async function waitForOverlayReady(lifecycle) {
     if (lifecycle.generation !== overlayGeneration || !isWindowUsable(lifecycle.window)) {
         throw new Error('Overlay generation changed during handshake');
     }
-}
-function createGeminiWindow() {
-    if (geminiWindow && !geminiWindow.isDestroyed()) {
-        return geminiWindow;
-    }
-    geminiWindow = new electron_1.BrowserWindow({
-        width: 1280,
-        height: 900,
-        show: false,
-        backgroundColor: '#0b0f14',
-        title: 'Gemini Web',
-        webPreferences: {
-            contextIsolation: true,
-            nodeIntegration: false,
-            partition: 'persist:gemini',
-        },
-    });
-    geminiWindow.on('close', (event) => {
-        if (!shutdownStarted) {
-            event.preventDefault();
-            geminiWindow?.hide();
-        }
-    });
-    geminiWindow.on('closed', () => {
-        geminiWindow = null;
-    });
-    return geminiWindow;
-}
-async function ensureGeminiWindowLoaded() {
-    const win = createGeminiWindow();
-    const url = win.webContents.getURL();
-    if (!url || url === 'about:blank') {
-        await win.loadURL(geminiUrl);
-    }
-    return win;
-}
-async function openGeminiWindow() {
-    const win = await ensureGeminiWindowLoaded();
-    win.show();
-    win.focus();
-    return win;
-}
-async function focusGeminiComposer(windowInstance, promptText) {
-    const safePrompt = JSON.stringify(promptText);
-    const focused = await windowInstance.webContents.executeJavaScript(`
-    (() => {
-      const selectors = ['div[contenteditable="true"]', 'div[role="textbox"]', 'textarea', 'input[type="text"]'];
-      const element = selectors.map((selector) => document.querySelector(selector)).find(Boolean);
-      if (element) {
-        element.focus();
-        element.click();
-        
-        const prompt = ${safePrompt};
-        if (prompt) {
-          if (element.tagName === 'DIV' || element.getAttribute('contenteditable') === 'true') {
-            element.innerText = prompt;
-          } else {
-            element.value = prompt;
-          }
-          // Dispatch events so the React engine registers the change and enables Send button
-          element.dispatchEvent(new Event('input', { bubbles: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        return true;
-      }
-      return false;
-    })();
-  `);
-    return Boolean(focused);
-}
-function sendPasteShortcut(windowInstance) {
-    windowInstance.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['ctrl'] });
-    windowInstance.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: ['ctrl'] });
 }
 // NOTE: status/response strings pushed from the main process (capture, AI, OCR,
 // Supabase, phone-sync flows) are currently Turkish-only. The renderer shows them
@@ -1778,7 +1488,7 @@ function handlePillHudEvent(line) {
         savedPillBounds = bounds;
         settings.panelX = bounds.x;
         settings.panelY = bounds.y;
-        saveSettingsToFile();
+        settingsStore.save();
         return;
     }
     if (line.startsWith('PILL_RESIZED:')) {
@@ -1796,7 +1506,7 @@ function handlePillHudEvent(line) {
                 });
                 settings.panelX = savedPillBounds.x;
                 settings.panelY = savedPillBounds.y;
-                saveSettingsToFile();
+                settingsStore.save();
                 sendPillHudCommand(`POS:${savedPillBounds.x}:${savedPillBounds.y}`);
             }
         }
@@ -2032,11 +1742,11 @@ async function captureAndSend(sessionId) {
             await analyzeWithApi(croppedImage, () => isSelectionSessionCurrent(sessionId) || actionSessionId === selectionActionInFlightSessionId);
             return;
         }
-        const windowInstance = await openGeminiWindow();
+        const windowInstance = await geminiWindowController.open();
         if (!isSelectionSessionCurrent(sessionId) && actionSessionId !== selectionActionInFlightSessionId)
             return;
-        const composerFocused = await focusGeminiComposer(windowInstance, settings.prompt);
-        sendPasteShortcut(windowInstance);
+        const composerFocused = await geminiWindowController.focusComposer(windowInstance, settings.prompt);
+        geminiWindowController.sendPasteShortcut(windowInstance);
         setResponse(`Seçilen alan Gemini web'e kopyalandı. ${composerFocused ? 'Yapıştırma denendi.' : 'Yapıştırma kısayolu gönderildi.'}`);
         setStatus("Seçilen görsel Gemini web'e yapıştırıldı");
         activateTransientPill();
@@ -2237,33 +1947,15 @@ async function captureAndSendToSupabase(sessionId) {
 electron_1.ipcMain.handle('save-settings', (_, nextSettings) => {
     if (shutdownStarted)
         return { ok: false };
-    const hasDbChanges = hasSupabaseRuntimeChange(nextSettings);
-    if (nextSettings.pillVisibility !== undefined) {
-        const nextVal = (0, pillVisibility_1.normalizePillVisibility)(nextSettings.pillVisibility);
-        if (settings.pillVisibility !== nextVal) {
-            settings.pillVisibility = nextVal;
-            applyCompactPillVisibility();
-        }
+    const result = settingsStore.update(nextSettings);
+    if (result.pillVisibilityChanged) {
+        applyCompactPillVisibility();
     }
-    Object.assign(settings, {
-        prompt: nextSettings.prompt ?? settings.prompt,
-        supabaseUrl: nextSettings.supabaseUrl ?? settings.supabaseUrl,
-        supabaseKey: nextSettings.supabaseKey ?? settings.supabaseKey,
-        supabaseBucket: nextSettings.supabaseBucket ?? settings.supabaseBucket,
-        autoCopyFromPhone: nextSettings.autoCopyFromPhone ?? settings.autoCopyFromPhone,
-        hotkeyVk: nextSettings.hotkeyVk ?? settings.hotkeyVk,
-        doublePressMs: nextSettings.doublePressMs ?? settings.doublePressMs,
-        aiProvider: nextSettings.aiProvider ?? settings.aiProvider,
-        aiApiKey: nextSettings.aiApiKey ?? settings.aiApiKey,
-        aiModel: nextSettings.aiModel ?? settings.aiModel,
-        aiBaseUrl: nextSettings.aiBaseUrl ?? settings.aiBaseUrl,
-        language: nextSettings.language ?? settings.language,
-    });
-    if (hasDbChanges) {
-        invalidateSupabaseRuntime();
+    if (result.supabaseChanged) {
+        supabaseRuntime.invalidate();
     }
     sendKeyListenerConfig();
-    saveSettingsToFile();
+    settingsStore.save();
     setupPhoneSyncPolling();
     setupClipboardPolling();
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2620,7 +2312,7 @@ electron_1.ipcMain.handle('panel-save-pinned', (_, pinned) => {
     if (shutdownStarted)
         return { ok: false };
     settings.panelPinned = Boolean(pinned);
-    saveSettingsToFile();
+    settingsStore.save();
     if (pinned) {
         presentSpotlight();
     }
@@ -2679,13 +2371,13 @@ electron_1.ipcMain.handle('setup-rls', async () => {
 electron_1.ipcMain.handle('open-gemini', async () => {
     if (shutdownStarted)
         return { ok: false };
-    const windowInstance = await openGeminiWindow();
+    const windowInstance = await geminiWindowController.open();
     return { ok: Boolean(windowInstance) };
 });
 electron_1.ipcMain.handle('focus-gemini', async () => {
     if (shutdownStarted)
         return { ok: false };
-    const windowInstance = await openGeminiWindow();
+    const windowInstance = await geminiWindowController.open();
     return { ok: Boolean(windowInstance) };
 });
 electron_1.ipcMain.handle('capture-now', async () => {
@@ -2912,96 +2604,8 @@ electron_1.ipcMain.handle('delete-downloaded-file', async (event, requestedPath)
     broadcastPhoneDownloads();
     return { ok: true };
 });
-function clearNotificationTimers() {
-    if (notificationDismissTimer) {
-        clearTimeout(notificationDismissTimer);
-        notificationDismissTimer = null;
-    }
-    if (notificationCloseTimer) {
-        clearTimeout(notificationCloseTimer);
-        notificationCloseTimer = null;
-    }
-}
-function displayNotification(win, generation, payload) {
-    win.webContents.send('notification-data', payload);
-    if (notificationDismissTimer)
-        clearTimeout(notificationDismissTimer);
-    notificationDismissTimer = setTimeout(() => {
-        notificationDismissTimer = null;
-        if (notificationWindow === win && notificationGeneration === generation && !shutdownStarted) {
-            win.webContents.send('notification-dismiss');
-            if (notificationCloseTimer)
-                clearTimeout(notificationCloseTimer);
-            notificationCloseTimer = setTimeout(() => {
-                notificationCloseTimer = null;
-                if (notificationWindow === win && notificationGeneration === generation && !shutdownStarted) {
-                    win.hide();
-                }
-            }, 500);
-        }
-    }, 3500);
-}
 function showCustomNotification(title, body, type = 'info') {
-    if (shutdownStarted)
-        return;
-    const payload = { title, body, type };
-    if (!notificationWindow || notificationWindow.isDestroyed()) {
-        pendingNotification = payload;
-        const work = electron_1.screen.getPrimaryDisplay().workArea;
-        const width = 360;
-        const height = 90;
-        notificationWindow = new electron_1.BrowserWindow({
-            x: work.x + work.width - width - 16,
-            y: work.y + 16,
-            width,
-            height,
-            frame: false,
-            transparent: true,
-            resizable: false,
-            movable: false,
-            focusable: false,
-            skipTaskbar: true,
-            alwaysOnTop: true,
-            hasShadow: false,
-            show: false,
-            webPreferences: {
-                preload: path.join(__dirname, 'preload.js'),
-                contextIsolation: true,
-                nodeIntegration: false,
-            },
-        });
-        notificationWindow.setAlwaysOnTop(true, 'screen-saver');
-        const generation = ++notificationGeneration;
-        notificationWindow.webContents.once('did-finish-load', () => {
-            notificationRendererReady = true;
-            if (notificationWindow === notificationWindow && notificationGeneration === generation && pendingNotification && !shutdownStarted) {
-                const toDisplay = pendingNotification;
-                pendingNotification = null;
-                notificationWindow.show();
-                displayNotification(notificationWindow, generation, toDisplay);
-            }
-        });
-        notificationWindow.loadFile(path.join(electron_1.app.getAppPath(), 'src', 'notification.html')).catch((err) => {
-            console.error('Failed to load notification file:', err);
-        });
-        notificationWindow.on('closed', () => {
-            if (notificationWindow === notificationWindow) {
-                notificationWindow = null;
-                notificationRendererReady = false;
-            }
-        });
-        return;
-    }
-    const generation = ++notificationGeneration;
-    clearNotificationTimers();
-    if (notificationRendererReady && !notificationWindow.isDestroyed() && !shutdownStarted) {
-        pendingNotification = null;
-        notificationWindow.show();
-        displayNotification(notificationWindow, generation, payload);
-    }
-    else {
-        pendingNotification = payload;
-    }
+    notificationController.show(title, body, type);
 }
 // ── Auto-updater ────────────────────────────────────────────────────────────
 electron_updater_1.autoUpdater.on('checking-for-update', () => {
@@ -3039,13 +2643,9 @@ else {
         }
     });
     electron_1.app.whenReady().then(() => {
-        loadSettingsFromFile();
-        loadPhoneSyncState();
-        // Migrate settings.pillVisibility if it is 'always'
-        if (settings.pillVisibility === 'always') {
-            settings.pillVisibility = 'background';
-            saveSettingsToFile();
-        }
+        settingsStore.load();
+        phoneSyncState.load();
+        settingsStore.migrateLegacyPillVisibility();
         createMainWindow();
         try {
             startKeyListener();
@@ -3059,7 +2659,9 @@ else {
         setupClipboardPolling();
         setTimeout(() => {
             if (!shutdownStarted) {
-                ensureGeminiWindowLoaded().catch((e) => console.error('Gemini ön-yükleme hatası:', e));
+                geminiWindowController
+                    .ensureLoaded()
+                    .catch((e) => console.error('Gemini ön-yükleme hatası:', e));
             }
         }, 5000);
         const isPacked = electron_1.app.isPackaged;

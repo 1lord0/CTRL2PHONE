@@ -1,0 +1,37 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.IPC_ON_CHANNELS = exports.IPC_HANDLE_CHANNELS = void 0;
+exports.IPC_HANDLE_CHANNELS = [
+    'save-settings',
+    'copy-selection',
+    'set-selection',
+    'cancel-selection',
+    'set-annotated',
+    'confirm-selection-gemini',
+    'confirm-selection-phone',
+    'confirm-selection-ocr',
+    'get-storage-usage',
+    'purge-storage',
+    'app-ready',
+    'panel-interact-start',
+    'panel-toggle',
+    'panel-drag-by',
+    'panel-dismiss',
+    'panel-resize-compact',
+    'panel-save-pinned',
+    'send-clipboard',
+    'generate-qr',
+    'setup-rls',
+    'open-gemini',
+    'focus-gemini',
+    'capture-now',
+    'overlay-renderer-ready',
+    'overlay-rendered',
+    'app-quit',
+    'upload-file-to-phone',
+    'delete-downloaded-file',
+];
+exports.IPC_ON_CHANNELS = [
+    'start-selection-drag',
+    'start-drag-downloaded-file',
+];
