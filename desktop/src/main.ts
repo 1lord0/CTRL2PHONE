@@ -41,6 +41,10 @@ import { executeCopySelection, CopySelectionPorts } from './lib/copySelection';
 import { calculateDragPreviewSize, executeSelectionElectronDrag } from './lib/selectionElectronDrag';
 import { resolveApprovedDownloadedFile } from './lib/downloadedFileAccess';
 import { createDefaultSettings, createElectronSettingsStore } from './main/settingsStore';
+import {
+  createSupabaseRuntime,
+  type SupabaseRuntimeContext,
+} from './main/supabaseRuntime';
 
 // GPU acceleration is enabled (required for native startDrag to work on Windows)
 
@@ -73,10 +77,6 @@ let nativeHudDisabledForRun = false;
 let pillHudReadyTimer: NodeJS.Timeout | null = null;
 const intentionallyStoppedPillHuds = new WeakSet<ChildProcess>();
 let shutdownStarted = false;
-let supabaseClient: SupabaseClient | null = null;
-let supabaseClientUrl = '';
-let supabaseClientKey = '';
-let supabaseConfigGeneration = 0;
 let phoneSyncInFlightGeneration: number | null = null;
 let storagePurgeInFlightGeneration: number | null = null;
 let overlayLifecycle: {
@@ -120,6 +120,17 @@ let _pillHudFallbackInFlight: Promise<void> | null = null;
 
 const settings = createDefaultSettings();
 const settingsStore = createElectronSettingsStore(settings);
+const supabaseRuntime = createSupabaseRuntime<SupabaseClient>(settings, {
+  createClient: (url, key) =>
+    createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    }),
+  onInvalidate: () => {
+    stopPhoneSyncPolling();
+    stopClipboardPolling();
+    phoneSyncInFlightGeneration = null;
+  },
+});
 
 const PILL_MIN = { width: 220, height: 44 };
 const PILL_MAX = { width: 720, height: 80 };
@@ -181,7 +192,7 @@ function stopPhoneSyncPolling(): void {
     phoneSyncInterval = null;
   }
   const channel = phoneSyncChannel;
-  const channelClient = supabaseClient;
+  const channelClient = supabaseRuntime.currentClient();
   phoneSyncChannel = null;
   if (channel && channelClient) {
     void channelClient.removeChannel(channel).catch((err) => {
@@ -195,16 +206,6 @@ function stopClipboardPolling(): void {
     clearInterval(clipboardSyncInterval);
     clipboardSyncInterval = null;
   }
-}
-
-function invalidateSupabaseRuntime(): void {
-  stopPhoneSyncPolling();
-  stopClipboardPolling();
-  supabaseConfigGeneration += 1;
-  phoneSyncInFlightGeneration = null;
-  supabaseClient = null;
-  supabaseClientUrl = '';
-  supabaseClientKey = '';
 }
 
 function beginShutdown(): boolean {
@@ -340,46 +341,14 @@ function setupClipboardPolling(): void {
   console.log('Clipboard polling initialized (1.5s)');
 }
 
-// Lazily (re)create the Supabase client when settings are present. Returns null
-// if Supabase is not configured yet.
-function ensureSupabaseClient(): SupabaseClient | null {
-  if (!settings.supabaseUrl || !settings.supabaseKey) {
-    return null;
-  }
-  if (!supabaseClient || supabaseClientUrl !== settings.supabaseUrl || supabaseClientKey !== settings.supabaseKey) {
-    supabaseClient = createClient(settings.supabaseUrl, settings.supabaseKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    supabaseClientUrl = settings.supabaseUrl;
-    supabaseClientKey = settings.supabaseKey;
-  }
-  return supabaseClient;
-}
-
-interface SupabaseContext {
-  client: SupabaseClient;
-  url: string;
-  bucket: string;
-  generation: number;
-}
+type SupabaseContext = SupabaseRuntimeContext<SupabaseClient>;
 
 function getSupabaseContext(): SupabaseContext | null {
-  const client = ensureSupabaseClient();
-  if (!client) return null;
-  return {
-    client,
-    url: settings.supabaseUrl,
-    bucket: settings.supabaseBucket || 'screenshots',
-    generation: supabaseConfigGeneration,
-  };
+  return supabaseRuntime.getContext();
 }
 
 function isSupabaseContextCurrent(context: SupabaseContext): boolean {
-  return (
-    context.generation === supabaseConfigGeneration &&
-    context.client === supabaseClient &&
-    context.bucket === (settings.supabaseBucket || 'screenshots')
-  );
+  return supabaseRuntime.isCurrent(context);
 }
 
 function getPhoneSyncStatePath(): string {
@@ -677,7 +646,7 @@ function setupPhoneSyncPolling(): void {
       // bucket_id == bucket name for user-created Supabase buckets.
       { event: 'INSERT', schema: 'storage', table: 'objects', filter: `bucket_id=eq.${bucket}` },
       (payload: { new?: { name?: string; id?: string; updated_at?: string } }) => {
-        if (generation !== supabaseConfigGeneration || !isSupabaseContextCurrent(context)) return;
+        if (!isSupabaseContextCurrent(context)) return;
         const row = payload?.new;
         const name = row?.name ?? '';
         if (name.startsWith('to_pc/')) {
@@ -2386,7 +2355,7 @@ ipcMain.handle('save-settings', (_, nextSettings: Partial<AppSettings>) => {
     applyCompactPillVisibility();
   }
   if (result.supabaseChanged) {
-    invalidateSupabaseRuntime();
+    supabaseRuntime.invalidate();
   }
 
   sendKeyListenerConfig();
