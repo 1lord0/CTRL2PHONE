@@ -31,15 +31,15 @@ export async function executeCopySelection<TImg extends NativeImageLike>(
     if (!image || image.isEmpty()) {
       return { ok: false, error: 'Empty selection image' };
     }
-    
+
     ports.writeImageToClipboard(image);
-    
+
     // Verify write by reading it back
     const readImage = ports.readImageFromClipboard();
     if (!readImage || readImage.isEmpty()) {
       return { ok: false, error: 'Clipboard write verification failed' };
     }
-    
+
     ports.setStatus('Seçim panoya kopyalandı');
     ports.onSuccess?.();
     return { ok: true };

@@ -10,8 +10,36 @@ desktop/settings.json
 # Compiled executables (users should build from source)
 desktop/src/*.exe
 
-# Compiled TypeScript output (do not commit)
-desktop/src/*.js
+# Compiled TypeScript output (do not commit). Keep product TypeScript and
+# Jest tests trackable; only generated JavaScript and source maps are ignored.
+desktop/src/**/*.js
+desktop/src/**/*.js.map
+desktop/src/**/*.map
+
+# Desktop-local agent state and investigation artifacts
+desktop/.agents/
+desktop/.omo/
+desktop/.codebase-memory/
+desktop/.debug-journal.md
+desktop/implementation_plan.md
+desktop/PROJE_INCELEME_RAPORU.md
+desktop/plans/
+desktop/reports/
+desktop/evidence/
+desktop/debug/
+desktop/plan.md
+desktop/report.md
+desktop/evidence.md
+desktop/debug.md
+desktop/*_report*.md
+desktop/*_plan*.md
+desktop/*_REPORT.md
+desktop/*_REPORT*.md
+desktop/*_PLAN.md
+desktop/*_PLAN*.md
+
+# Local terminal captures
+terminals/
 
 # Personal launcher scripts
 *.bat

@@ -7,14 +7,16 @@ function bridgeCallNames(source: string): ReadonlySet<string> {
   const calls = new Set<string>();
 
   function visit(node: ts.Node): void {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isPropertyAccessExpression(node.expression.expression) &&
-      node.expression.expression.expression.getText(sourceFile) === 'window' &&
-      node.expression.expression.name.text === 'bridge'
-    ) {
-      calls.add(node.expression.name.text);
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const expr = node.expression.expression;
+      if (
+        (ts.isPropertyAccessExpression(expr) &&
+          expr.expression.getText(sourceFile) === 'window' &&
+          expr.name.text === 'bridge') ||
+        (ts.isIdentifier(expr) && expr.text === 'overlayBridge')
+      ) {
+        calls.add(node.expression.name.text);
+      }
     }
     ts.forEachChild(node, visit);
   }

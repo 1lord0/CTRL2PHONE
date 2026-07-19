@@ -14,9 +14,11 @@ export function resolveApprovedDownloadedFile(
 
   for (const approvedPath of approvedPaths) {
     const normalizedApproved = pathApi.resolve(approvedPath);
-    const matches = platform === 'win32'
-      ? normalizedApproved.toLocaleLowerCase('en-US') === normalizedRequest.toLocaleLowerCase('en-US')
-      : normalizedApproved === normalizedRequest;
+    const matches =
+      platform === 'win32'
+        ? normalizedApproved.toLocaleLowerCase('en-US') ===
+          normalizedRequest.toLocaleLowerCase('en-US')
+        : normalizedApproved === normalizedRequest;
 
     if (matches) return approvedPath;
   }

@@ -144,24 +144,32 @@ export async function analyzeImage(
   prompt: string
 ): Promise<string> {
   const { url, headers, body } = buildAiRequest(cfg, pngBase64, prompt);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    let detail = '';
-    try {
-      detail = (await res.text()).slice(0, 400);
-    } catch {
-      // ignore body-read failure
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let detail = '';
+      try {
+        detail = (await res.text()).slice(0, 400);
+      } catch {
+        // ignore body-read failure
+      }
+      throw new Error(`${cfg.provider} ${res.status}: ${detail}`);
     }
-    throw new Error(`${cfg.provider} ${res.status}: ${detail}`);
+    const json = await res.json();
+    const text = parseAiResponse(cfg.provider, json);
+    if (!text) {
+      throw new Error('Boş veya beklenmeyen yanıt formatı');
+    }
+    return text;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  const json = await res.json();
-  const text = parseAiResponse(cfg.provider, json);
-  if (!text) {
-    throw new Error('Boş veya beklenmeyen yanıt formatı');
-  }
-  return text;
 }

@@ -46,18 +46,14 @@ export class SelectionDragRuntime {
     this.ports.sendDragState(sessionId, true);
   }
 
-  public handleStarting(
-    sessionId: number,
-    generation: number,
-    confirmGo: () => void
-  ): void {
+  public handleStarting(sessionId: number, generation: number, confirmGo: () => void): void {
     if (!this.ports.isSessionCurrent(sessionId) || !this.ports.isGenerationCurrent(generation)) {
       return;
     }
-    
+
     // Move overlay offscreen before writing GO
     this.ports.moveOverlayOffscreen();
-    
+
     confirmGo();
   }
 
@@ -102,10 +98,12 @@ export class SelectionDragRuntime {
     if (this.restoreContext) {
       const context = this.restoreContext;
       this.restoreContext = null; // consume once
-      
-      this.ports.setStatus(type === 'cancel' ? 'Bırakma iptal edildi' : `Sürükle-bırak başarısız oldu: ${reason}`);
+
+      this.ports.setStatus(
+        type === 'cancel' ? 'Bırakma iptal edildi' : `Sürükle-bırak başarısız oldu: ${reason}`
+      );
       await this.ports.restoreOverlay(context);
-      
+
       if (type === 'cancel') {
         // Re-prepare new drag proxy for retry if still enabled and cancelled
         this.ports.triggerDragProxySpawn(sessionId);

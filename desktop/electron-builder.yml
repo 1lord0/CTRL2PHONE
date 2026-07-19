@@ -5,7 +5,7 @@ directories:
   output: dist
   buildResources: build
 files:
-  - src/**/*.js
+  - dist/js/**/*.js
   - src/**/*.html
   - src/**/*.css
   - index.html

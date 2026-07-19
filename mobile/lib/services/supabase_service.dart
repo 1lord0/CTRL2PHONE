@@ -15,6 +15,8 @@ class SupabaseService {
 
   static bool get isInitialized => _clientInstance != null;
 
+  static SupabaseClient? get client => _clientInstance;
+
   static void initClient(String url, String key, String bucket) {
     _clientInstance = SupabaseClient(url, key);
     _bucketName = bucket;

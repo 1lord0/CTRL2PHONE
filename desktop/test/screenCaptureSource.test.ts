@@ -1,9 +1,68 @@
 import {
   calculateThumbnailSize,
+  createExternalCaptureDisplayCache,
   selectCaptureSource,
   selectExternalCaptureDisplay,
   CaptureSource,
 } from '../src/lib/screenCaptureSource';
+
+describe('external capture display cache', () => {
+  const target = {
+    bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+    scaleFactor: 1,
+  };
+
+  it('reuses a successful display listing across capture sessions', async () => {
+    // Given a stable external display configuration
+    const loadDisplays = jest.fn(async () => [
+      { id: '\\\\.\\DISPLAY1', left: 0, top: 0, width: 1920, height: 1080 },
+    ]);
+    const cache = createExternalCaptureDisplayCache(loadDisplays);
+
+    // When the same active display is resolved twice
+    await cache.resolve(target);
+    await cache.resolve(target);
+
+    // Then the expensive external display listing runs once
+    expect(loadDisplays).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes once when cached displays no longer match the active display', async () => {
+    // Given a cached configuration that becomes stale
+    const loadDisplays = jest
+      .fn<Promise<readonly ExternalCaptureDisplay[]>, []>()
+      .mockResolvedValueOnce([
+        { id: '\\\\.\\DISPLAY2', left: 1920, top: 0, width: 1920, height: 1080 },
+      ])
+      .mockResolvedValueOnce([
+        { id: '\\\\.\\DISPLAY1', left: 0, top: 0, width: 1920, height: 1080 },
+      ]);
+    const cache = createExternalCaptureDisplayCache(loadDisplays);
+
+    // When the active display cannot be found in the cached listing
+    const display = await cache.resolve(target);
+
+    // Then one fresh listing is attempted before returning the correct display
+    expect(loadDisplays).toHaveBeenCalledTimes(2);
+    expect(display?.id).toBe('\\\\.\\DISPLAY1');
+  });
+
+  it('reloads displays after explicit invalidation', async () => {
+    // Given a previously resolved display listing
+    const loadDisplays = jest.fn(async () => [
+      { id: '\\\\.\\DISPLAY1', left: 0, top: 0, width: 1920, height: 1080 },
+    ]);
+    const cache = createExternalCaptureDisplayCache(loadDisplays);
+    await cache.resolve(target);
+
+    // When Electron reports a display topology change
+    cache.invalidate();
+    await cache.resolve(target);
+
+    // Then the next capture reloads the external display mapping
+    expect(loadDisplays).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('calculateThumbnailSize', () => {
   it('calculates size correctly for 100% scale factor', () => {

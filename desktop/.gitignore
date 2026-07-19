@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.bak
+*.patching
+*.reconstructed
+.codebase-memory/
+src/**/*.js
+src/**/*.js.map
+test/**/*.js
+test/**/*.js.map

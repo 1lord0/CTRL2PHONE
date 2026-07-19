@@ -101,7 +101,7 @@ export function createPhoneSyncState(
 
   return {
     load,
-    hasKey: key => syncedPaths.has(key),
+    hasKey: (key) => syncedPaths.has(key),
     isSynced,
     markSynced,
   };
@@ -111,8 +111,8 @@ export function createElectronPhoneSyncState(maxEntries = 2000): PhoneSyncState 
   return createPhoneSyncState(
     {
       resolvePath: () => path.join(app.getPath('userData'), 'phone-sync-state.json'),
-      exists: filePath => fs.existsSync(filePath),
-      readText: filePath => fs.readFileSync(filePath, 'utf8'),
+      exists: (filePath) => fs.existsSync(filePath),
+      readText: (filePath) => fs.readFileSync(filePath, 'utf8'),
       writeText: (filePath, content) => fs.writeFileSync(filePath, content, 'utf8'),
       warn: (message, error) => console.warn(message, error),
       error: (message, error) => console.error(message, error),

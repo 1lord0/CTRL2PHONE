@@ -64,7 +64,8 @@ const en: Strings = {
   'status.uploadError': 'Upload failed',
   'status.sendingGemini': 'Sending to Gemini...',
   'status.sentGemini': 'Image copied to clipboard and pasted into Gemini',
-  'overlay.selectionReadyClipboard': 'Copied to clipboard (Ctrl+V). Send: X Gemini · M Phone · C OCR',
+  'overlay.selectionReadyClipboard':
+    'Copied to clipboard (Ctrl+V). Send: X Gemini · M Phone · C OCR',
   'response.placeholder': 'The AI reply will appear here.',
   'status.settingsSaved': 'Settings saved',
   'status.purging': 'Purging...',
@@ -85,8 +86,7 @@ const en: Strings = {
   'opt.langSystem': 'System',
   'opt.langEn': 'English',
   'opt.langTr': 'Türkçe',
-  'panel.tagline':
-    'Double Ctrl → capture · Ctrl+Shift+Space → panel · Esc → minimize · X → quit',
+  'panel.tagline': 'Double Ctrl → capture · Ctrl+Shift+Space → panel · Esc → minimize · X → quit',
   'label.pinPanel': 'Pin panel open',
   'label.unpinPanel': 'Unpin panel',
   'label.openPanel': 'Open panel (Ctrl+Shift+Space)',
@@ -160,7 +160,8 @@ const tr: Strings = {
   'status.uploadError': 'Supabase yükleme hatası',
   'status.sendingGemini': "Gemini'ye gönderiliyor...",
   'status.sentGemini': "Görsel panoya kopyalandı ve Gemini'ye yapıştırıldı",
-  'overlay.selectionReadyClipboard': 'Panoya kopyalandı (Ctrl+V). Gönder: X Gemini · M Telefon · C OCR',
+  'overlay.selectionReadyClipboard':
+    'Panoya kopyalandı (Ctrl+V). Gönder: X Gemini · M Telefon · C OCR',
   'response.placeholder': 'Yapay zeka yanıtı burada görünecek.',
   'status.settingsSaved': 'Ayarlar kaydedildi',
   'status.purging': 'Temizleniyor...',
@@ -182,8 +183,7 @@ const tr: Strings = {
   'opt.langSystem': 'Sistem',
   'opt.langEn': 'English',
   'opt.langTr': 'Türkçe',
-  'panel.tagline':
-    'Çift Ctrl → yakala · Ctrl+Shift+Space → panel · Esc → paneli küçült · X → çık',
+  'panel.tagline': 'Çift Ctrl → yakala · Ctrl+Shift+Space → panel · Esc → paneli küçült · X → çık',
   'label.pinPanel': 'Paneli sabitle',
   'label.unpinPanel': 'Sabitlemeyi kaldır',
   'label.openPanel': 'Paneli aç (Ctrl+Shift+Space)',

@@ -2,6 +2,10 @@
 // eklemeyin! Modül yapmak tsc'ye CommonJS önsözü (`exports` referansı) yazdırır ve
 // script tarayıcıda "exports is not defined" ile ilk satırda ölür. Üst düzey isimler
 // renderer.ts/overlay.ts ile çakışmamalıdır (bu yüzden pill* önekleri kullanılıyor).
+
+// Cast bridge to MainBridgeAPI since pill renderer is a global script and cannot import types
+const pillBridge = (window as any).bridge as import('./types').MainBridgeAPI;
+
 const pillHud = document.getElementById('pillHud') as HTMLElement;
 const pillOpenBtn = document.getElementById('pillOpen') as HTMLButtonElement;
 const pillStatusNode = document.getElementById('pillStatus') as HTMLElement;
@@ -53,10 +57,10 @@ function measureCompactStatus(text: string): { width: number; height: number } {
 
   const singleLineW = compactMeasureNode.scrollWidth;
   const singleLineH = compactMeasureNode.offsetHeight;
-  
+
   const downloadsNode = document.getElementById('pillDownloads');
   const downloadsW = downloadsNode ? downloadsNode.getBoundingClientRect().width : 0;
-  
+
   const chromeW = PILL_CHROME_PAD_X + 4 + (downloadsW > 0 ? downloadsW + 12 : 0);
   const textSlotMax = pillMaxWidth - chromeW;
 
@@ -84,8 +88,7 @@ function updateCompactOverflow(): void {
   if (!pillStatusNode) return;
   requestAnimationFrame(() => {
     const el = pillStatusNode;
-    const overflows =
-      el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+    const overflows = el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
     el.classList.toggle('is-overflow', overflows);
     if (overflows) {
       el.style.setProperty('--marquee-end', `-${Math.max(0, el.scrollWidth - el.clientWidth)}px`);
@@ -101,7 +104,7 @@ function scheduleCompactPillResize(text?: string): void {
     compactResizeTimer = null;
     const sample = text ?? pillStatusNode?.textContent ?? pillT('status.ready', 'Hazır');
     const size = measureCompactStatus(sample);
-    void window.bridge.panelResizeCompact(size).then(() => updateCompactOverflow());
+    void pillBridge.panelResizeCompact(size).then(() => updateCompactOverflow());
   }, 32);
 }
 
@@ -128,24 +131,24 @@ const pillDownloads = document.getElementById('pillDownloads') as HTMLElement;
 function renderDownloads(files: DownloadedFile[]): void {
   if (!pillDownloads) return;
   pillDownloads.innerHTML = '';
-  
+
   files.forEach((file) => {
     const item = document.createElement('div');
     item.className = 'download-item';
     item.setAttribute('draggable', 'true');
     item.title = file.name;
-    
+
     const span = document.createElement('span');
     span.className = 'file-icon';
     const parts = file.name.split('.');
     span.textContent = parts[parts.length - 1] || '???';
     item.appendChild(span);
-    
+
     item.addEventListener('dragstart', (e) => {
       e.preventDefault();
-      window.bridge.startDragDownloadedFile(file.path);
+      pillBridge.startDragDownloadedFile(file.path);
     });
-    
+
     const deleteBtn = document.createElement('div');
     deleteBtn.className = 'download-item-delete';
     deleteBtn.innerHTML = '&times;';
@@ -153,13 +156,13 @@ function renderDownloads(files: DownloadedFile[]): void {
     deleteBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      void window.bridge.deleteDownloadedFile(file.path);
+      void pillBridge.deleteDownloadedFile(file.path);
     });
-    
+
     item.appendChild(deleteBtn);
     pillDownloads.appendChild(item);
   });
-  
+
   scheduleCompactPillResize();
 }
 
@@ -167,14 +170,14 @@ function bindPillUi(): void {
   const onMouseDown = (e: MouseEvent): void => {
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest('.download-item')) return;
-    void window.bridge.panelInteractStart();
+    void pillBridge.panelInteractStart();
   };
 
   const onHudClick = (e: MouseEvent): void => {
     if ((e.target as HTMLElement).closest('#pillOpen')) return;
     if ((e.target as HTMLElement).closest('.download-item')) return;
     e.preventDefault();
-    void window.bridge.panelToggle();
+    void pillBridge.panelToggle();
   };
 
   pillHud?.addEventListener('mousedown', onMouseDown, true);
@@ -183,13 +186,13 @@ function bindPillUi(): void {
   pillOpenBtn?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    void window.bridge.panelToggle();
+    void pillBridge.panelToggle();
   });
 
   pillHud?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      void window.bridge.panelToggle();
+      void pillBridge.panelToggle();
     }
   });
   pillHud?.setAttribute('tabindex', '0');
@@ -227,18 +230,18 @@ function bindPillUi(): void {
         for (let i = 0; i < e.dataTransfer.files.length; i++) {
           const file = e.dataTransfer.files[i];
           if (file && file.path) {
-            void window.bridge.uploadFileToPhone(file.path);
+            void pillBridge.uploadFileToPhone(file.path);
           }
         }
       }
     });
   }
 
-  window.bridge.onHudCapturing((active) => {
+  pillBridge.onHudCapturing((active: any) => {
     pillHud?.classList.toggle('is-capturing', active);
   });
 
-  window.bridge.onPillResized((size) => {
+  pillBridge.onPillResized((size: any) => {
     applyPillGeometry(size);
     updateCompactOverflow();
   });
@@ -246,13 +249,13 @@ function bindPillUi(): void {
     applyPillGeometry();
     scheduleCompactPillResize();
   });
-  window.bridge.onStatus((message) => showPillStatus(message));
-  window.bridge.onPhoneDownloadsUpdated((files) => renderDownloads(files));
+  pillBridge.onStatus((message: any) => showPillStatus(message));
+  pillBridge.onPhoneDownloadsUpdated((files: any) => renderDownloads(files));
 }
 
 bindPillUi();
 
-window.bridge.ready().then((state) => {
+pillBridge.ready().then((state: any) => {
   pillI18n = state.i18n || {};
   if (typeof state.pillMaxWidth === 'number' && state.pillMaxWidth > 0) {
     pillMaxWidth = state.pillMaxWidth;

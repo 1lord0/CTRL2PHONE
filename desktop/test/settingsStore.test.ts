@@ -105,21 +105,40 @@ describe('settings store', () => {
     expect(settings.aiApiKey).toBe('ai-secret');
   });
 
-  it('migrates the legacy always visibility once and persists it', () => {
-    // Given legacy visibility in the live settings object
+  it('defaults autoCopyFromPhone to true in default settings', () => {
     const settings = createDefaultSettings();
-    settings.pillVisibility = 'always';
-    const fixture = createPorts();
-    const store = createSettingsStore(settings, fixture.ports);
+    expect(settings.autoCopyFromPhone).toBe(true);
+  });
 
-    // When the startup migration runs twice
-    const first = store.migrateLegacyPillVisibility();
-    const second = store.migrateLegacyPillVisibility();
+  it('preserves persisted autoCopyFromPhone false value', () => {
+    const persisted = JSON.stringify({
+      autoCopyFromPhone: false,
+    });
+    const settings = createDefaultSettings();
+    expect(settings.autoCopyFromPhone).toBe(true); // default is true
+    
+    const { ports } = createPorts(persisted);
+    const store = createSettingsStore(settings, ports);
+    store.load();
+    
+    expect(settings.autoCopyFromPhone).toBe(false); // loads false from file
+  });
 
-    // Then only the first call changes state and the migrated value is persisted
-    expect(first).toBe(true);
-    expect(second).toBe(false);
-    expect(settings.pillVisibility).toBe('background');
-    expect(JSON.parse(fixture.written() ?? '{}')).toMatchObject({ pillVisibility: 'background' });
+  it('round-trips all pillVisibility modes unchanged', () => {
+    const modes = ['always', 'background', 'capture-only'] as const;
+    for (const mode of modes) {
+      const persisted = JSON.stringify({
+        pillVisibility: mode,
+      });
+      const settings = createDefaultSettings();
+      const fixture = createPorts(persisted);
+      const store = createSettingsStore(settings, fixture.ports);
+      store.load();
+      expect(settings.pillVisibility).toBe(mode);
+      
+      store.save();
+      const written = JSON.parse(fixture.written() ?? '{}');
+      expect(written.pillVisibility).toBe(mode);
+    }
   });
 });

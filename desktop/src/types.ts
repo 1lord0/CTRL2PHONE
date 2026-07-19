@@ -70,68 +70,89 @@ export interface AnnotationPayload {
   sessionId: number;
 }
 
-export interface BridgeAPI {
-  ready: () => Promise<
-    AppSettings & {
-      selectionActive: boolean;
-      panelMode: PanelMode;
-      pillMaxWidth: number;
-      i18n: Record<string, string>;
-      phoneDownloads?: Array<{ path: string; name: string; isImage: boolean }>;
-    }
-  >;
-  saveSettings: (settings: Partial<AppSettings>) => Promise<{ ok: boolean }>;
-  generateQr: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
-  captureNow: () => Promise<{ ok: boolean; mode?: string }>;
-  openGemini: () => Promise<{ ok: boolean }>;
-  focusGemini: () => Promise<{ ok: boolean }>;
-  notifyOverlayReady: () => Promise<{ ok: boolean }>;
-  notifyOverlayRendered: (sessionId: number) => Promise<{ ok: boolean }>;
-  setSelection: (payload: SelectionPayload) => Promise<{ ok: boolean }>;
-  cancelSelection: (sessionId: number) => Promise<{ ok: boolean }>;
-  setAnnotated: (payload: AnnotationPayload) => Promise<{ ok: boolean }>;
-  startSelectionDrag: (sessionId: number) => void;
-  onSelectionDragState: (callback: (data: { sessionId: number; ready: boolean; reason?: string }) => void) => void;
-  copySelection: (sessionId: number) => Promise<{ ok: true } | { ok: false; error: string }>;
-  onStatus: (callback: (message: string) => void) => void;
-  onResponse: (callback: (message: string) => void) => void;
-  onOverlayState: (callback: (state: OverlayState) => void) => void;
-  onOverlayMessage: (callback: (message: string) => void) => void;
-  confirmSelectionGemini: (sessionId: number) => Promise<{ ok: boolean }>;
-  confirmSelectionPhone: (sessionId: number) => Promise<{ ok: boolean }>;
-  confirmSelectionOcr: (sessionId: number) => Promise<{ ok: boolean }>;
-  getStorageUsage: () => Promise<{
+export type MainReadyState = AppSettings & {
+  selectionActive: boolean;
+  panelMode: PanelMode;
+  pillMaxWidth: number;
+  i18n: Record<string, string>;
+  phoneDownloads?: Array<{ path: string; name: string; isImage: boolean }>;
+};
+
+export type MainBridgeAPI = {
+  readonly ready: () => Promise<MainReadyState>;
+  readonly saveSettings: (settings: Partial<AppSettings>) => Promise<{ ok: boolean }>;
+  readonly generateQr: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
+  readonly captureNow: () => Promise<{ ok: boolean; mode?: string }>;
+  readonly openGemini: () => Promise<{ ok: boolean }>;
+  readonly focusGemini: () => Promise<{ ok: boolean }>;
+  readonly getStorageUsage: () => Promise<{
     ok: boolean;
     usedBytes?: number;
     limitBytes?: number;
     usedPercentage?: number;
     error?: string;
   }>;
-  purgeStorage: () => Promise<{ ok: boolean; deletedCount?: number; error?: string }>;
-  setupRls: () => Promise<{ ok: boolean; sql?: string; error?: string }>;
-  sendClipboard: () => Promise<{ ok: boolean; error?: string }>;
-  panelToggle: () => Promise<{ ok: boolean; mode: PanelMode }>;
-  panelInteractStart: () => Promise<{ ok: boolean }>;
-  panelDragBy: (dx: number, dy: number) => Promise<{ ok: boolean }>;
-  panelDismiss: () => Promise<{ ok: boolean; mode: PanelMode }>;
-  quitApp: () => Promise<{ ok: boolean }>;
-  savePanelPinned: (pinned: boolean) => Promise<{ ok: boolean }>;
-  panelResizeCompact: (size: { width: number; height: number }) => Promise<{
+  readonly purgeStorage: () => Promise<{ ok: boolean; deletedCount?: number; error?: string }>;
+  readonly setupRls: () => Promise<{ ok: boolean; sql?: string; error?: string }>;
+  readonly sendClipboard: () => Promise<{ ok: boolean; error?: string }>;
+  readonly panelToggle: () => Promise<{ ok: boolean; mode: PanelMode }>;
+  readonly panelInteractStart: () => Promise<{ ok: boolean }>;
+  readonly panelDragBy: (dx: number, dy: number) => Promise<{ ok: boolean }>;
+  readonly panelDismiss: () => Promise<{ ok: boolean; mode: PanelMode }>;
+  readonly quitApp: () => Promise<{ ok: boolean }>;
+  readonly savePanelPinned: (pinned: boolean) => Promise<{ ok: boolean }>;
+  readonly panelResizeCompact: (size: { width: number; height: number }) => Promise<{
     ok: boolean;
     width?: number;
     height?: number;
   }>;
-  onPanelMode: (callback: (mode: PanelMode) => void) => void;
-  onHudCapturing: (callback: (active: boolean) => void) => void;
-  onPillDragState: (callback: (dragging: boolean) => void) => void;
-  onPillResized: (callback: (size: { width: number; height: number }) => void) => void;
-  onNotification: (callback: (data: { title: string; body: string; type: 'success' | 'info' | 'error' | 'sync' }) => void) => void;
-  onDismissNotification: (callback: () => void) => void;
-  uploadFileToPhone: (filePath: string) => Promise<{ ok: boolean }>;
-  startDragDownloadedFile: (filePath: string) => void;
-  deleteDownloadedFile: (filePath: string) => Promise<{ ok: boolean }>;
-  onPhoneDownloadsUpdated: (callback: (files: Array<{ path: string; name: string; isImage: boolean }>) => void) => void;
-}
+  readonly onPanelMode: (callback: (mode: PanelMode) => void) => void;
+  readonly onHudCapturing: (callback: (active: boolean) => void) => void;
+  readonly onPillDragState: (callback: (dragging: boolean) => void) => void;
+  readonly onPillResized: (callback: (size: { width: number; height: number }) => void) => void;
+  readonly onStatus: (callback: (message: string) => void) => void;
+  readonly onResponse: (callback: (message: string) => void) => void;
+  readonly onOverlayMessage: (callback: (message: string) => void) => void;
+  readonly uploadFileToPhone: (filePath: string) => Promise<{ ok: boolean }>;
+  readonly startDragDownloadedFile: (filePath: string) => void;
+  readonly deleteDownloadedFile: (filePath: string) => Promise<{ ok: boolean }>;
+  readonly onPhoneDownloadsUpdated: (
+    callback: (files: Array<{ path: string; name: string; isImage: boolean }>) => void
+  ) => void;
+};
+
+export type OverlayBridgeAPI = {
+  readonly notifyOverlayReady: () => Promise<{ ok: boolean }>;
+  readonly notifyOverlayRendered: (sessionId: number) => Promise<{ ok: boolean }>;
+  readonly setSelection: (payload: SelectionPayload) => Promise<{ ok: boolean }>;
+  readonly cancelSelection: (sessionId: number) => Promise<{ ok: boolean }>;
+  readonly setAnnotated: (payload: AnnotationPayload) => Promise<{ ok: boolean }>;
+  readonly startSelectionDrag: (sessionId: number) => void;
+  readonly onSelectionDragState: (
+    callback: (data: { sessionId: number; ready: boolean; reason?: string }) => void
+  ) => void;
+  readonly copySelection: (
+    sessionId: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  readonly onOverlayState: (callback: (state: OverlayState) => void) => void;
+  readonly onOverlayMessage: (callback: (message: string) => void) => void;
+  readonly confirmSelectionGemini: (sessionId: number) => Promise<{ ok: boolean }>;
+  readonly confirmSelectionPhone: (sessionId: number) => Promise<{ ok: boolean }>;
+  readonly confirmSelectionOcr: (sessionId: number) => Promise<{ ok: boolean }>;
+};
+
+export type NotificationBridgeAPI = {
+  readonly onNotification: (
+    callback: (data: {
+      title: string;
+      body: string;
+      type: 'success' | 'info' | 'error' | 'sync';
+    }) => void
+  ) => void;
+  readonly onDismissNotification: (callback: () => void) => void;
+};
+
+export type BridgeAPI = MainBridgeAPI | OverlayBridgeAPI | NotificationBridgeAPI;
 
 declare global {
   interface Window {

@@ -3,16 +3,19 @@
   "version": "1.0.0",
   "description": "Capture any area of your screen with Double Ctrl, send it to Gemini Web or directly to your phone via Supabase.",
   "private": true,
-  "main": "src/main.js",
+  "main": "dist/js/main.js",
   "scripts": {
     "start": "npm run build && npm run build:native && electron .",
     "dev": "tsc --watch",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "build:native": "cd src && \"%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\" /nologo /reference:System.Windows.Forms.dll /target:exe /out:key_listener.exe key_listener.cs && \"%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\" /nologo /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /target:winexe /out:pill_hud.exe pill_hud.cs && \"%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\" /nologo /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /target:winexe /out:photo_dropper.exe photo_dropper.cs && \"%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\" /nologo /target:exe /out:round_window.exe round_window.cs",
     "package": "npm run build && npm run build:native && electron-builder",
     "lint": "eslint src/",
-    "format": "prettier --write src/",
-    "test": "jest"
+    "format": "prettier --write src",
+    "format:check": "prettier --check src",
+    "test": "jest",
+    "test:ci": "jest --runInBand"
   },
   "keywords": [
     "screenshot",

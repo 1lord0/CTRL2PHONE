@@ -21,6 +21,53 @@ export interface ExternalCaptureTarget {
   readonly scaleFactor: number;
 }
 
+export interface ExternalCaptureDisplayCache<T extends ExternalCaptureDisplay> {
+  resolve(target: ExternalCaptureTarget): Promise<T | null>;
+  invalidate(): void;
+}
+
+export function createExternalCaptureDisplayCache<T extends ExternalCaptureDisplay>(
+  loadDisplays: () => Promise<readonly T[]>
+): ExternalCaptureDisplayCache<T> {
+  let cachedDisplays: readonly T[] | null = null;
+  let pendingLoad: Promise<readonly T[]> | null = null;
+  let generation = 0;
+
+  const load = async (): Promise<readonly T[]> => {
+    if (cachedDisplays) return cachedDisplays;
+    if (pendingLoad) return await pendingLoad;
+    const loadGeneration = generation;
+    const request = loadDisplays();
+    pendingLoad = request;
+    try {
+      const displays = await request;
+      if (generation === loadGeneration) {
+        cachedDisplays = displays;
+      }
+      return displays;
+    } finally {
+      if (pendingLoad === request) {
+        pendingLoad = null;
+      }
+    }
+  };
+
+  const invalidate = (): void => {
+    generation += 1;
+    cachedDisplays = null;
+  };
+
+  return {
+    async resolve(target) {
+      const cachedMatch = selectExternalCaptureDisplay(await load(), target);
+      if (cachedMatch) return cachedMatch;
+      invalidate();
+      return selectExternalCaptureDisplay(await load(), target);
+    },
+    invalidate,
+  };
+}
+
 export interface CaptureSource<T = Electron.NativeImage> {
   id: string;
   name: string;

@@ -38,7 +38,6 @@ export interface SettingsStore {
   readonly load: () => void;
   readonly save: () => void;
   readonly update: (next: Partial<AppSettings>) => SettingsUpdateResult;
-  readonly migrateLegacyPillVisibility: () => boolean;
 }
 
 export function createDefaultSettings(): AppSettings {
@@ -116,28 +115,21 @@ export function createSettingsStore(
     };
   };
 
-  const migrateLegacyPillVisibility = (): boolean => {
-    if (settings.pillVisibility !== 'always') return false;
-    settings.pillVisibility = 'background';
-    save();
-    return true;
-  };
-
-  return { settings, load, save, update, migrateLegacyPillVisibility };
+  return { settings, load, save, update };
 }
 
 export function createElectronSettingsStore(settings: AppSettings): SettingsStore {
   return createSettingsStore(settings, {
     persistence: {
       resolvePath: () => path.join(app.getPath('userData'), 'settings.json'),
-      exists: filePath => fs.existsSync(filePath),
-      readText: filePath => fs.readFileSync(filePath, 'utf8'),
+      exists: (filePath) => fs.existsSync(filePath),
+      readText: (filePath) => fs.readFileSync(filePath, 'utf8'),
       writeText: (filePath, content) => fs.writeFileSync(filePath, content, 'utf8'),
     },
     encryption: {
       isAvailable: () => safeStorage.isEncryptionAvailable(),
-      encrypt: value => safeStorage.encryptString(value).toString('base64'),
-      decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64')),
+      encrypt: (value) => safeStorage.encryptString(value).toString('base64'),
+      decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
     },
     logger: {
       info: (message, detail) => console.log(message, detail ?? ''),

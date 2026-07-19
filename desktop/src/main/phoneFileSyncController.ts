@@ -10,10 +10,7 @@ export interface RemotePhoneFile {
   readonly updated_at?: string | null;
 }
 
-export interface PhoneFileSyncPorts<
-  Context extends PhoneFileSyncContext,
-  Subscription
-> {
+export interface PhoneFileSyncPorts<Context extends PhoneFileSyncContext, Subscription> {
   readonly isEnabled: () => boolean;
   readonly getContext: () => Context | null;
   readonly isContextCurrent: (context: Context) => boolean;
@@ -47,10 +44,7 @@ export interface PhoneFileSyncController {
   readonly stop: () => void;
 }
 
-export function createPhoneFileSyncController<
-  Context extends PhoneFileSyncContext,
-  Subscription
->(
+export function createPhoneFileSyncController<Context extends PhoneFileSyncContext, Subscription>(
   ports: PhoneFileSyncPorts<Context, Subscription>
 ): PhoneFileSyncController {
   let inFlightGeneration: number | null = null;
@@ -86,7 +80,7 @@ export function createPhoneFileSyncController<
   ): Promise<void> => {
     for (const file of files) {
       if (!ports.isContextCurrent(context)) return;
-      if (!isValidPhoneFileName(file.name)) continue;
+      if (!isValidRemotePhoneFile(file) || !isValidPhoneFileName(file.name)) continue;
       const path = `to_pc/${file.name}`;
       if (ports.isSynced(context, path, file)) await deleteRemote(context, path);
     }
@@ -104,8 +98,15 @@ export function createPhoneFileSyncController<
         return;
       }
       if (!ports.isContextCurrent(context) || result.files.length === 0) return;
-      const pending = result.files.filter(file => {
-        if (!isValidPhoneFileName(file.name)) return false;
+      const pending = result.files.filter((file) => {
+        if (!isValidRemotePhoneFile(file)) {
+          ports.warn('Phone sync: skipped remote file with invalid metadata (redacted)');
+          return false;
+        }
+        if (!isValidPhoneFileName(file.name)) {
+          ports.warn('Phone sync: skipped remote file with invalid name (redacted)');
+          return false;
+        }
         return !ports.isSynced(context, `to_pc/${file.name}`, file);
       });
       if (pending.length === 0) {
@@ -136,12 +137,19 @@ export function createPhoneFileSyncController<
     const context = ports.getContext();
     if (!context || !path.startsWith('to_pc/')) return;
     const name = path.slice('to_pc/'.length);
-    if (!isValidPhoneFileName(name)) return;
+    if (!isValidPhoneFileName(name)) {
+      ports.warn('Phone sync: skipped sync path with invalid name (redacted)');
+      return;
+    }
     const file: RemotePhoneFile = {
       name,
       id: metadata?.id,
       updated_at: metadata?.updated_at,
     };
+    if (!isValidRemotePhoneFile(file)) {
+      ports.warn('Phone sync: skipped sync path with invalid metadata (redacted)');
+      return;
+    }
     if (ports.isSynced(context, path, file)) {
       await deleteRemote(context, path);
       return;
@@ -184,8 +192,13 @@ export function createPhoneFileSyncController<
     }
     subscription = ports.subscribe(
       context,
-      file => {
-        if (ports.isContextCurrent(context) && file.name.startsWith('to_pc/')) {
+      (file) => {
+        if (
+          ports.isContextCurrent(context) &&
+          file &&
+          typeof file.name === 'string' &&
+          file.name.startsWith('to_pc/')
+        ) {
           void syncPath(file.name, file);
         }
       },
@@ -201,6 +214,31 @@ export function createPhoneFileSyncController<
   return { check, syncPath, setup, stop };
 }
 
-export function isValidPhoneFileName(name: string | null | undefined): name is string {
-  return Boolean(name && name !== '.keep' && !name.startsWith('.'));
+export function isValidRemotePhoneFile(file: any): boolean {
+  if (!file || typeof file !== 'object') return false;
+  if (typeof file.name !== 'string') return false;
+  if (file.id !== undefined && file.id !== null && typeof file.id !== 'string') return false;
+  if (
+    file.updated_at !== undefined &&
+    file.updated_at !== null &&
+    typeof file.updated_at !== 'string'
+  )
+    return false;
+  return true;
+}
+
+export function isValidPhoneFileName(name: any): name is string {
+  if (typeof name !== 'string') return false;
+  if (!name || name === '.keep' || name.startsWith('.')) return false;
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) return false;
+  if (/^[a-zA-Z]:/.test(name)) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F]/.test(name)) return false;
+  if (name.length > 255) return false;
+
+  const dotIndex = name.lastIndexOf('.');
+  if (dotIndex === -1) return false;
+  const ext = name.slice(dotIndex).toLowerCase();
+  const allowed = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'];
+  return allowed.includes(ext);
 }

@@ -1,3 +1,7 @@
+import type { MainBridgeAPI } from './types';
+
+const bridge = window.bridge as MainBridgeAPI;
+
 const promptInput = document.getElementById('prompt') as HTMLTextAreaElement;
 const supabaseUrlInput = document.getElementById('supabaseUrl') as HTMLInputElement;
 const supabaseKeyInput = document.getElementById('supabaseKey') as HTMLInputElement;
@@ -110,23 +114,23 @@ function bindChromeButton(
 
 function initSpotlightPanel(): void {
   bindChromeButton(dismissPanelBtn, async () => {
-    await window.bridge.quitApp();
+    await bridge.quitApp();
   });
 
   bindChromeButton(pinPanelBtn, async () => {
     panelPinned = !panelPinned;
     updatePinUi();
-    await window.bridge.savePanelPinned(panelPinned);
+    await bridge.savePanelPinned(panelPinned);
   });
 
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape' && !panelPinned) {
       e.preventDefault();
-      await window.bridge.panelDismiss();
+      await bridge.panelDismiss();
     }
   });
 
-  window.bridge.onPanelMode((mode) => {
+  bridge.onPanelMode((mode) => {
     setPanelVisualMode(mode);
   });
 }
@@ -164,7 +168,7 @@ function showResponse(text: string): void {
 
 async function updateQrCode(): Promise<void> {
   try {
-    const result = await window.bridge.generateQr();
+    const result = await bridge.generateQr();
     if (result?.ok && result.dataUrl) {
       qrCodeImage.src = result.dataUrl;
       qrCodeImage.classList.remove('hidden');
@@ -180,7 +184,7 @@ async function updateQrCode(): Promise<void> {
 async function updateStorageUsage(): Promise<void> {
   const requestId = ++storageUsageRequestId;
   try {
-    const result = await window.bridge.getStorageUsage();
+    const result = await bridge.getStorageUsage();
     if (requestId !== storageUsageRequestId) return;
     if (
       result?.ok &&
@@ -272,33 +276,33 @@ aiProviderInput?.addEventListener('change', updateAiProviderUi);
 // Switching the interface language persists it and re-renders from the freshly
 // resolved string map the main process returns.
 uiLanguageInput?.addEventListener('change', async () => {
-  await window.bridge.saveSettings({
+  await bridge.saveSettings({
     language: (uiLanguageInput.value as 'system' | 'en' | 'tr') || 'system',
   });
-  const state = await window.bridge.ready();
+  const state = await bridge.ready();
   loadSettings(state);
 });
 
 document.getElementById('quitApp')?.addEventListener('click', async () => {
-  await window.bridge.quitApp();
+  await bridge.quitApp();
 });
 
 initSpotlightPanel();
-window.bridge.ready().then((state) => {
+bridge.ready().then((state) => {
   loadSettings(state);
 });
 
-window.bridge.onStatus((message) => {
+bridge.onStatus((message) => {
   showStatus(message);
 });
 
-window.bridge.onResponse((message) => {
+bridge.onResponse((message) => {
   showResponse(message);
   // Trigger storage update whenever we finish sending something
   updateStorageUsage();
 });
 
-window.bridge.onOverlayMessage((message) => {
+bridge.onOverlayMessage((message) => {
   const overlayText = document.getElementById('overlayText');
   if (overlayText) {
     overlayText.textContent = message;
@@ -311,7 +315,7 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
     supabaseUrl: supabaseUrlInput.value.trim(),
     supabaseKey: supabaseKeyInput.value.trim(),
     supabaseBucket: supabaseBucketInput.value.trim() || 'screenshots',
-    autoCopyFromPhone: autoCopyFromPhoneInput ? autoCopyFromPhoneInput.checked : true,
+    autoCopyFromPhone: autoCopyFromPhoneInput ? autoCopyFromPhoneInput.checked : false,
     hotkeyVk: parseInt(hotkeyVkInput?.value ?? '162', 10) || 162,
     // Clamp to the range the C# listener accepts so the persisted/displayed value
     // can never diverge from the threshold actually in effect.
@@ -329,7 +333,7 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
       (pillVisibilityInput?.value as 'always' | 'background' | 'capture-only') || 'always',
   };
 
-  const result = await window.bridge.saveSettings(payload);
+  const result = await bridge.saveSettings(payload);
 
   if (result?.ok) {
     showStatus(t('status.settingsSaved', 'Ayarlar kaydedildi'));
@@ -341,7 +345,7 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
 document.getElementById('setupRls')?.addEventListener('click', async () => {
   showStatus(t('status.rlsCopying', 'RLS SQL panoya kopyalanıyor...'));
   try {
-    const result = await window.bridge.setupRls();
+    const result = await bridge.setupRls();
     if (result?.ok) {
       showStatus(
         t(
@@ -379,7 +383,7 @@ document.getElementById('purgeStorage')?.addEventListener('click', async () => {
 
   showStatus(t('status.purging', 'Temizleniyor...'));
   try {
-    const result = await window.bridge.purgeStorage();
+    const result = await bridge.purgeStorage();
     if (result?.ok) {
       showStatus(
         t('status.purgeDone', 'Temizlik başarılı ({n} dosya silindi)').replace(
@@ -402,7 +406,7 @@ document.getElementById('purgeStorage')?.addEventListener('click', async () => {
 document.getElementById('sendClipboard')?.addEventListener('click', async () => {
   showStatus(t('status.sendingClipboard', 'Metin telefona gönderiliyor...'));
   try {
-    const result = await window.bridge.sendClipboard();
+    const result = await bridge.sendClipboard();
     if (!result?.ok) {
       showStatus(
         t('status.sendClipboardError', 'Gönderim hatası: ') +

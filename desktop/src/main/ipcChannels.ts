@@ -29,7 +29,4 @@ export const IPC_HANDLE_CHANNELS = [
   'delete-downloaded-file',
 ] as const;
 
-export const IPC_ON_CHANNELS = [
-  'start-selection-drag',
-  'start-drag-downloaded-file',
-] as const;
+export const IPC_ON_CHANNELS = ['start-selection-drag', 'start-drag-downloaded-file'] as const;

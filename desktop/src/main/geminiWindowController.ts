@@ -134,18 +134,19 @@ function wrapElectronWindow(window: BrowserWindow): GeminiWindow {
   return {
     webContents: {
       getURL: () => window.webContents.getURL(),
-      executeJavaScript: script => window.webContents.executeJavaScript(script),
-      sendInputEvent: event => window.webContents.sendInputEvent({ ...event, modifiers: [...event.modifiers] }),
+      executeJavaScript: (script) => window.webContents.executeJavaScript(script),
+      sendInputEvent: (event) =>
+        window.webContents.sendInputEvent({ ...event, modifiers: [...event.modifiers] }),
     },
     isDestroyed: () => window.isDestroyed(),
-    loadURL: async url => {
+    loadURL: async (url) => {
       await window.loadURL(url);
     },
     show: () => window.show(),
     hide: () => window.hide(),
     focus: () => window.focus(),
-    onClose: listener =>
-      window.on('close', event => listener({ preventDefault: () => event.preventDefault() })),
-    onClosed: listener => window.on('closed', listener),
+    onClose: (listener) =>
+      window.on('close', (event) => listener({ preventDefault: () => event.preventDefault() })),
+    onClosed: (listener) => window.on('closed', listener),
   };
 }

@@ -12,7 +12,7 @@
   </head>
   <body class="overlay-body">
     <canvas id="annotationCanvas" class="annotation-canvas"></canvas>
-    
+
     <div class="overlay-instructions">
       <div id="overlayText">
         <span>Ekranı sürükleyerek alan seçin.</span>
@@ -35,38 +35,91 @@
     </div>
 
     <div id="selectionBox" class="selection-box hidden"></div>
-    
+
     <!-- Seçim Eylem Barı -->
     <div id="actionBar" class="action-bar hidden">
       <button type="button" class="action-btn copy" id="btnCopy" title="Seçimi panoya kopyalar">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <rect x="9" y="9" width="11" height="11" rx="2"></rect>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
           </svg>
         </span>
         Kopyala
       </button>
-      <button type="button" class="action-btn gemini" id="btnGemini" title="Seçimi Gemini'a gönderir (X veya Enter)">
+      <button
+        type="button"
+        class="action-btn gemini"
+        id="btnGemini"
+        title="Seçimi Gemini'a gönderir (X veya Enter)"
+      >
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polygon
+              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+            ></polygon>
           </svg>
         </span>
         Gemini
       </button>
-      <button type="button" class="action-btn phone" id="btnPhone" title="Seçimi telefona gönderir (M)">
+      <button
+        type="button"
+        class="action-btn phone"
+        id="btnPhone"
+        title="Seçimi telefona gönderir (M)"
+      >
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
             <line x1="12" y1="18" x2="12.01" y2="18"></line>
           </svg>
         </span>
         Telefon
       </button>
-      <button type="button" class="action-btn ocr" id="btnOcr" title="Metni oku ve panoya kopyala (C)">
+      <button
+        type="button"
+        class="action-btn ocr"
+        id="btnOcr"
+        title="Metni oku ve panoya kopyala (C)"
+      >
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <polyline points="4 7 4 4 20 4 20 7"></polyline>
             <line x1="9" y1="20" x2="15" y2="20"></line>
             <line x1="12" y1="4" x2="12" y2="20"></line>
@@ -76,7 +129,16 @@
       </button>
       <button type="button" class="action-btn cancel" id="btnCancel" title="İptal et (Esc)">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="15" y1="9" x2="9" y2="15"></line>
             <line x1="9" y1="9" x2="15" y2="15"></line>
@@ -85,7 +147,7 @@
         İptal
       </button>
     </div>
-    
-    <script src="./overlay.js"></script>
+
+    <script src="../dist/js/overlay.js"></script>
   </body>
 </html>

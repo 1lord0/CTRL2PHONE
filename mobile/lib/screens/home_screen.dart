@@ -9,6 +9,7 @@ import '../widgets/photo_card.dart';
 import 'detail_screen.dart';
 import 'settings_screen.dart';
 
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 

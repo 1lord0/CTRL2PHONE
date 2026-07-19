@@ -69,12 +69,31 @@ No cloud accounts needed on our side — **you bring your own Supabase** (free t
 git clone https://github.com/1lord0/ctrl2phone.git
 cd ctrl2phone/desktop
 
-# Install dependencies
-npm install
+# Install the locked dependency tree
+npm ci
 
 # Run
 npm start
 ```
+
+To run the same checks used by Desktop CI (run the native-helper steps on
+Windows), use these exact commands from `ctrl2phone/desktop`:
+
+```bash
+npm ci
+npm run typecheck
+npm run lint
+npm run format:check
+npm run build:native
+npm test -- --runInBand
+npm audit --omit=dev --audit-level=high
+npm run build
+npm run package
+```
+
+`npm start` runs the TypeScript build, native-helper build, and Electron app
+in one command. `npm run package` writes the installer artifacts to
+`desktop/dist/`.
 
 1. Enter your **Supabase URL**, **Anon Key**, and **Bucket Name** in the settings panel
 2. Click **"Ayarları kaydet"** (Save Settings)
@@ -119,6 +138,22 @@ Pressing **X** sends the selected region to whichever backend you pick in **Sett
 
 Your API key is stored **encrypted on your device** (Electron `safeStorage`) and is sent only to the provider you choose. With any API provider the model's reply appears directly in the app's response pane — no browser needed. The prompt note (top of settings) is sent alongside the image.
 
+### 📦 Desktop output and preload boundaries
+
+TypeScript sources live under `desktop/src/`. `npm run build` compiles them to
+`desktop/dist/js/` (the generated JavaScript and source maps are not hand-edited
+or committed). `npm run package` places the Electron installer and portable
+artifacts in `desktop/dist/` alongside that compiled output.
+
+Each Electron window receives only the bridge it needs:
+
+- `src/preload-main.ts` — the main panel/pill window bridge.
+- `src/preload-overlay.ts` — the selection overlay bridge.
+- `src/preload-notification.ts` — the phone-sync notification bridge.
+
+All three use context isolation with Node integration disabled; renderer code
+does not receive a broad Node or IPC surface.
+
 ### 📋 Prerequisites
 
 - **Node.js** 18+ and **npm**
@@ -126,23 +161,29 @@ Your API key is stored **encrypted on your device** (Electron `safeStorage`) and
 - **Supabase** account (free tier: [supabase.com](https://supabase.com))
 - **Flutter** 3.x (for mobile app)
 
-### 🔨 Building the C# Key Listener
+### 🔨 Building the Windows helpers
 
-There are **two** small C# Windows helpers that must be compiled before running:
+The desktop runtime uses four small native Windows executables. They are
+compiled from the C# sources in `desktop/src/`:
 
-- `key_listener.exe` — the global double-Ctrl hotkey listener.
-- `photo_dropper.exe` — the floating drag-and-drop panel shown when a photo arrives from your phone. **If you skip this, phone→PC sync still copies the image to your clipboard, but the panel won't appear.**
+| Helper | Role |
+|---|---|
+| `key_listener.exe` | Global double-Ctrl hotkey listener |
+| `pill_hud.exe` | Native floating pill HUD |
+| `round_window.exe` | Applies the native rounded/transparent window shape |
+| `photo_dropper.exe` | Floating drag-and-drop panel for phone→PC files |
+
+From the desktop directory, compile all four with the repository script (it
+adds the required Windows Forms and Drawing references):
 
 ```powershell
-# From the desktop/src directory
-cd ctrl2phone/desktop/src
-
-# Using csc (C# compiler) — included with Windows SDK or Visual Studio
-csc /target:winexe /out:key_listener.exe key_listener.cs
-csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
+cd ctrl2phone/desktop
+npm run build:native
 ```
 
-> ⚠️ **Do not commit `key_listener.exe` / `photo_dropper.exe` to Git.** They are already listed in `.gitignore`.
+If `photo_dropper.exe` is unavailable, phone→PC sync still copies an image to
+the clipboard, but the drag-and-drop panel cannot appear. The generated
+executables are ignored by Git and should not be committed.
 
 ### 🔒 Security Notes
 
@@ -217,7 +258,7 @@ Ctrl2Phone, masaüstünden ekran görüntüsü alıp **Gemini Web**'e yapıştı
 ```bash
 git clone https://github.com/1lord0/ctrl2phone.git
 cd ctrl2phone/desktop
-npm install
+npm ci
 npm start
 ```
 
@@ -270,22 +311,26 @@ Bilgisayarınız ile telefonunuz arasında metin veya bağlantıları (link) anl
 
 > 💡 Pano verileriniz Supabase Realtime (WebSocket) ile anlık iletildikten hemen sonra veritabanından otomatik olarak silinir, böylece veritabanınız temiz ve güvenli kalır.
 
-### 🔨 C# Key Listener Derleme
+### 🔨 Windows yardımcılarını derleme
 
-Çalıştırılmadan önce derlenmesi gereken **iki** küçük C# Windows yardımcısı var:
+Masaüstü çalışma zamanı dört küçük native Windows çalıştırılabilir dosya kullanır:
 
 - `key_listener.exe` — global çift-Ctrl kısayol dinleyicisi.
-- `photo_dropper.exe` — telefondan görsel geldiğinde açılan sürükle-bırak paneli. **Bunu derlemezseniz telefon→PC eşitlemesi görseli yine panoya kopyalar, ancak panel açılmaz.**
+- `pill_hud.exe` — native yüzen çubuk HUD'ı.
+- `round_window.exe` — native yuvarlak/şeffaf pencere şekillendirme.
+- `photo_dropper.exe` — telefondan gelen dosyalar için sürükle-bırak paneli.
+
+Gerekli Windows Forms ve Drawing referanslarını ekleyen depo komutunu masaüstü
+klasöründen çalıştırın:
 
 ```powershell
-cd ctrl2phone/desktop/src
-
-# csc kullanarak (Windows SDK veya Visual Studio ile gelir)
-csc /target:winexe /out:key_listener.exe key_listener.cs
-csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
+cd ctrl2phone/desktop
+npm run build:native
 ```
 
-> ⚠️ **`key_listener.exe` / `photo_dropper.exe`'yi Git'e commit etmeyin.** `.gitignore`'da zaten listelenmiştir.
+`photo_dropper.exe` yoksa telefon→PC eşitlemesi görseli panoya kopyalamaya devam
+eder, ancak sürükle-bırak paneli açılamaz. Üretilen `.exe` dosyaları `.gitignore`
+tarafından yok sayılır; Git'e commit etmeyin.
 
 ### 🔒 Güvenlik Notları
 
@@ -311,24 +356,23 @@ csc /target:winexe /out:photo_dropper.exe photo_dropper.cs
 
 ```
 ctrl2phone/
-├── desktop/                  # Electron desktop app (TypeScript → compiled to .js)
-│   ├── src/
-│   │   ├── main.ts           # Main process (capture, AI routing, upload, hotkeys)
-│   │   ├── preload.ts        # contextBridge IPC bridge
-│   │   ├── renderer.ts       # Settings UI + i18n application
-│   │   ├── overlay.ts        # Selection + annotation overlay logic
-│   │   ├── types.ts          # Shared types (AppSettings, BridgeAPI)
-│   │   ├── lib/              # Pure, unit-tested logic
-│   │   │   ├── geometry.ts    # Crop / scale / virtual-bounds math
-│   │   │   ├── aiProviders.ts # Multi-provider AI request builders + parsers
-│   │   │   ├── supabaseSetup.ts # RLS setup SQL generator
-│   │   │   └── i18n.ts        # EN/TR string dictionaries + locale resolver
-│   │   ├── overlay.html / overlay.css / styles.css
-│   │   ├── key_listener.cs    # C# global keyboard hook source (compile to .exe)
-│   │   └── photo_dropper.cs   # C# phone→PC drag-drop panel (compile to .exe)
-│   ├── test/                 # Jest unit tests (geometry, aiProviders, i18n, …)
-│   ├── index.html            # Main window
-│   └── package.json
+├── desktop/
+│   ├── src/                  # TypeScript, renderer assets, and native sources
+│   │   ├── main.ts           # Main process and window registration
+│   │   ├── preload-main.ts   # Main panel/pill contextBridge
+│   │   ├── preload-overlay.ts # Selection overlay contextBridge
+│   │   ├── preload-notification.ts # Notification contextBridge
+│   │   ├── main/ and lib/    # Controllers, IPC registrars, and pure logic
+│   │   ├── key_listener.cs   # Compile to key_listener.exe
+│   │   ├── pill_hud.cs       # Compile to pill_hud.exe
+│   │   ├── round_window.cs   # Compile to round_window.exe
+│   │   └── photo_dropper.cs  # Compile to photo_dropper.exe
+│   ├── test/                 # Jest unit and native-helper contract tests
+│   ├── dist/js/              # Generated CommonJS JavaScript from npm run build
+│   ├── dist/                 # electron-builder installers and portable output
+│   ├── index.html / pill.html
+│   ├── package.json
+│   └── package-lock.json
 ├── mobile/                   # Flutter mobile app
 │   └── ...
 ├── docs/

@@ -31,6 +31,7 @@ export interface NotificationControllerPorts<Window extends NotificationWindow> 
 export interface NotificationController {
   readonly show: (title: string, body: string, type?: NotificationType) => void;
   readonly shutdown: () => void;
+  readonly getWindow: () => any | null;
 }
 
 export function createNotificationController<Window extends NotificationWindow>(
@@ -132,7 +133,7 @@ export function createNotificationController<Window extends NotificationWindow>(
     clearTimers();
   };
 
-  return { show, shutdown };
+  return { show, shutdown, getWindow: () => window };
 }
 
 export function createElectronNotificationController(
@@ -159,14 +160,16 @@ export function createElectronNotificationController(
         hasShadow: false,
         show: false,
         webPreferences: {
-          preload: path.join(__dirname, '..', 'preload.js'),
+          preload: path.join(__dirname, '..', 'preload-notification.js'),
           contextIsolation: true,
           nodeIntegration: false,
         },
       });
     },
-    loadWindow: window =>
-      window.loadFile(path.join(app.getAppPath(), 'src', 'notification.html')).then(() => undefined),
-    logLoadError: error => console.error('Failed to load notification file:', error),
+    loadWindow: (window) =>
+      window
+        .loadFile(path.join(app.getAppPath(), 'src', 'notification.html'))
+        .then(() => undefined),
+    logLoadError: (error) => console.error('Failed to load notification file:', error),
   });
 }

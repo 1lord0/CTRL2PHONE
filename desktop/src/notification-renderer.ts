@@ -3,6 +3,8 @@ const notificationIconNode = document.getElementById('notificationIcon');
 const notificationTitleNode = document.getElementById('notificationTitle');
 const notificationDescriptionNode = document.getElementById('notificationDesc');
 
+const notificationBridge = window.bridge as import('./types').NotificationBridgeAPI;
+
 const notificationIconTemplates: Record<'success' | 'info' | 'error' | 'sync', string> = {
   success: `
     <svg viewBox="0 0 24 24">
@@ -31,7 +33,7 @@ const notificationIconTemplates: Record<'success' | 'info' | 'error' | 'sync', s
   `,
 };
 
-window.bridge.onNotification((data) => {
+notificationBridge.onNotification((data) => {
   if (
     !notificationBannerNode ||
     !notificationIconNode ||
@@ -43,12 +45,13 @@ window.bridge.onNotification((data) => {
 
   notificationTitleNode.textContent = data.title;
   notificationDescriptionNode.textContent = data.body;
-  notificationIconNode.innerHTML = notificationIconTemplates[data.type] ?? notificationIconTemplates.info;
+  notificationIconNode.innerHTML =
+    notificationIconTemplates[data.type] ?? notificationIconTemplates.info;
   notificationBannerNode.classList.remove('slide-out');
   notificationBannerNode.classList.add('slide-in');
 });
 
-window.bridge.onDismissNotification(() => {
+notificationBridge.onDismissNotification(() => {
   if (!notificationBannerNode) return;
   notificationBannerNode.classList.remove('slide-in');
   notificationBannerNode.classList.add('slide-out');
