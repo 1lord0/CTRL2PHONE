@@ -91,9 +91,7 @@ jobs:
         run: npm run build
 
       - name: Package Electron app
-        run: npm run package
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run package:dev
 
       - name: Check diff cleanliness
         run: |

@@ -16,6 +16,7 @@ describe('AppLifecycleController', () => {
   let nativePillHudStopCount = 0;
   let startupOrder: string[] = [];
   let cleanupStaleFilesCalled = false;
+  let cleanupPhoneDownloadsCalled = false;
   let setupPhoneSyncCalled = false;
   let setupClipboardCalled = false;
   let stopPhoneSyncCalled = false;
@@ -68,6 +69,7 @@ describe('AppLifecycleController', () => {
       stop: () => { keyListenerStopped = true; },
     } as any,
     cleanupStaleSelectionDragFiles: () => { cleanupStaleFilesCalled = true; },
+    cleanupPhoneSyncDownloads: async () => { cleanupPhoneDownloadsCalled = true; },
     setupPhoneSyncPolling: () => { setupPhoneSyncCalled = true; },
     setupClipboardPolling: () => { setupClipboardCalled = true; },
     stopPhoneSyncPolling: () => { stopPhoneSyncCalled = true; },
@@ -127,6 +129,7 @@ describe('AppLifecycleController', () => {
     nativePillHudStopCount = 0;
     startupOrder = [];
     cleanupStaleFilesCalled = false;
+    cleanupPhoneDownloadsCalled = false;
     setupPhoneSyncCalled = false;
     setupClipboardCalled = false;
     stopPhoneSyncCalled = false;
@@ -160,6 +163,7 @@ describe('AppLifecycleController', () => {
     expect(displayAddedRegistered).toBe(true);
     expect(keyListenerStarted).toBe(true);
     expect(cleanupStaleFilesCalled).toBe(true);
+    expect(cleanupPhoneDownloadsCalled).toBe(false);
     expect(setupPhoneSyncCalled).toBe(true);
     expect(setupClipboardCalled).toBe(true);
 
@@ -182,21 +186,22 @@ describe('AppLifecycleController', () => {
     expect(nativePillHudStarted).toBe(false);
   });
 
-  it('performs clean and idempotent shutdown', () => {
+  it('performs clean and idempotent shutdown', async () => {
     const controller = createAppLifecycleController(ports);
     controller.start();
 
     // Shutdown 1
-    const shutdown1 = controller.beginShutdown();
+    const shutdown1 = await controller.beginShutdown();
     expect(shutdown1).toBe(true);
     expect(keyListenerStopped).toBe(true);
     expect(stopPhoneSyncCalled).toBe(true);
     expect(stopClipboardCalled).toBe(true);
+    expect(cleanupPhoneDownloadsCalled).toBe(true);
     expect(nativePillHudStopCount).toBe(1);
 
-    // Shutdown 2 (should be idempotent)
-    const shutdown2 = controller.beginShutdown();
-    expect(shutdown2).toBe(false);
+    // Shutdown 2 (should be idempotent and return same completion)
+    const shutdown2 = await controller.beginShutdown();
+    expect(shutdown2).toBe(true);
     expect(nativePillHudStopCount).toBe(1);
   });
 });

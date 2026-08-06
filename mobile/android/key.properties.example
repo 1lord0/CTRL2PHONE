@@ -1,0 +1,6 @@
+# Copy to key.properties for a local release build. Never commit key.properties
+# or a keystore. Paths may be absolute or relative to android/app.
+storeFile=../upload-keystore.jks
+storePassword=replace-locally
+keyAlias=upload
+keyPassword=replace-locally

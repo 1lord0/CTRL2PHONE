@@ -3,6 +3,50 @@ import { buildRlsSetupSql } from '../lib/supabaseSetup';
 import { resolveLang, getStrings } from '../lib/i18n';
 import * as path from 'path';
 import { IpcMain } from 'electron';
+import type { AppSettings } from '../types';
+import type { DiagnosticsLogger } from './diagnosticsLogger';
+
+export type NormalizedSettingsUpdate =
+  | { ok: true; settings: Partial<AppSettings> }
+  | { ok: false; error: string };
+
+export function normalizeSettingsUpdate(
+  current: AppSettings,
+  next: Partial<AppSettings>
+): NormalizedSettingsUpdate {
+  const settings: Partial<AppSettings> = { ...next };
+  const connectionFieldsPresent =
+    Object.prototype.hasOwnProperty.call(next, 'supabaseUrl') ||
+    Object.prototype.hasOwnProperty.call(next, 'supabaseKey') ||
+    Object.prototype.hasOwnProperty.call(next, 'supabaseBucket') ||
+    Object.prototype.hasOwnProperty.call(next, 'autoCopyFromPhone');
+
+  if (!connectionFieldsPresent) return { ok: true, settings };
+
+  const supabaseUrl =
+    typeof next.supabaseUrl === 'string' ? next.supabaseUrl.trim() : current.supabaseUrl.trim();
+  const supabaseKey =
+    typeof next.supabaseKey === 'string' ? next.supabaseKey.trim() : current.supabaseKey.trim();
+  const supabaseBucket =
+    typeof next.supabaseBucket === 'string'
+      ? next.supabaseBucket.trim() || 'screenshots'
+      : current.supabaseBucket.trim() || 'screenshots';
+  const autoCopyFromPhone = next.autoCopyFromPhone ?? current.autoCopyFromPhone;
+  const credentialsRequired = autoCopyFromPhone || Boolean(supabaseUrl || supabaseKey);
+
+  if (credentialsRequired && (!supabaseUrl || !supabaseKey)) {
+    return {
+      ok: false,
+      error: 'Supabase URL ve Anon Key alanları birlikte doldurulmalıdır.',
+    };
+  }
+
+  settings.supabaseUrl = supabaseUrl;
+  settings.supabaseKey = supabaseKey;
+  settings.supabaseBucket = supabaseBucket;
+  settings.autoCopyFromPhone = autoCopyFromPhone;
+  return { ok: true, settings };
+}
 
 export interface SettingsIpcDeps {
   isShutdownStarted(): boolean;
@@ -20,7 +64,7 @@ export interface SettingsIpcDeps {
     invalidate(): void;
   };
   sendKeyListenerConfig(): void;
-  setupPhoneSyncPolling(): void;
+  setupPhoneSyncPolling(): Promise<void> | void;
   setupClipboardPolling(): void;
   settings: any;
   getPillMaxWidth(): number;
@@ -31,31 +75,64 @@ export interface SettingsIpcDeps {
   selectionSession: {
     active: boolean;
   };
+  diagnostics?: Pick<DiagnosticsLogger, 'action' | 'info' | 'error'>;
 }
 
 export function registerSettingsIpc(ipc: IpcMain, deps: SettingsIpcDeps): () => void {
-  ipc.handle('save-settings', (event: any, nextSettings: any) => {
+  ipc.handle('save-settings', async (event: any, nextSettings: any) => {
     if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
     if (deps.isShutdownStarted()) return { ok: false };
-    const result = deps.settingsStore.update(nextSettings);
-
-    if (result.pillVisibilityChanged) {
-      deps.mainWindowController.applyCompactPillVisibility();
+    const settingsSummary = {
+      fields: Object.keys(nextSettings ?? {}).sort(),
+      supabaseUrlPresent: Boolean(nextSettings?.supabaseUrl),
+      supabaseKeyPresent: Boolean(nextSettings?.supabaseKey),
+      supabaseBucketPresent: Boolean(nextSettings?.supabaseBucket),
+      autoCopyFromPhone: nextSettings?.autoCopyFromPhone,
+    };
+    deps.diagnostics?.action('settings.save_requested', settingsSummary);
+    const normalized = normalizeSettingsUpdate(deps.settings, nextSettings ?? {});
+    if (!normalized.ok) {
+      deps.diagnostics?.error(
+        'settings',
+        'settings_validation_failed',
+        new Error(normalized.error),
+        settingsSummary,
+        'validation'
+      );
+      return normalized;
     }
-    if (result.supabaseChanged) {
-      deps.supabaseRuntime.invalidate();
-    }
+    try {
+      const result = deps.settingsStore.update(normalized.settings);
 
-    deps.sendKeyListenerConfig();
-    deps.settingsStore.save();
-    deps.setupPhoneSyncPolling();
-    deps.setupClipboardPolling();
+      if (result.pillVisibilityChanged) {
+        deps.mainWindowController.applyCompactPillVisibility();
+      }
+      if (result.supabaseChanged) {
+        deps.supabaseRuntime.invalidate();
+      }
 
-    const mainWindow = deps.mainWindowController.getWindow();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('settings-changed', deps.settings);
+      deps.sendKeyListenerConfig();
+      deps.settingsStore.save();
+      await deps.setupPhoneSyncPolling();
+      if (deps.isShutdownStarted()) return { ok: false };
+      deps.setupClipboardPolling();
+
+      const mainWindow = deps.mainWindowController.getWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('settings-changed', deps.settings);
+      }
+      deps.diagnostics?.info('settings', 'settings_saved', {
+        fields: Object.keys(normalized.settings).sort(),
+        supabaseChanged: Boolean(result.supabaseChanged),
+      });
+      return { ok: true };
+    } catch (error) {
+      deps.diagnostics?.error('settings', 'settings_save_failed', error, settingsSummary);
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Ayarlar kaydedilemedi.',
+      };
     }
-    return { ok: true };
   });
 
   ipc.handle('app-ready', (event: any) => {

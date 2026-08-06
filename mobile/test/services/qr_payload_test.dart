@@ -8,7 +8,11 @@ void main() {
 
     test('accepts a valid https payload and extracts url/key/bucket', () {
       final r = parseQrPayload(
-        qr({'url': 'https://abc.supabase.co', 'key': 'anon-key', 'bucket': 'shots'}),
+        qr({
+          'url': 'https://abc.supabase.co',
+          'key': 'anon-key',
+          'bucket': 'shots'
+        }),
       );
       expect(r.ok, true);
       expect(r.error, isNull);
@@ -19,7 +23,11 @@ void main() {
 
     test('trims surrounding whitespace on every field', () {
       final r = parseQrPayload(
-        qr({'url': '  https://abc.supabase.co  ', 'key': '  k  ', 'bucket': '  b  '}),
+        qr({
+          'url': '  https://abc.supabase.co  ',
+          'key': '  k  ',
+          'bucket': '  b  '
+        }),
       );
       expect(r.ok, true);
       expect(r.url, 'https://abc.supabase.co');
@@ -28,11 +36,13 @@ void main() {
     });
 
     test('defaults the bucket to SCREENSHOTS when omitted or blank', () {
-      final omitted = parseQrPayload(qr({'url': 'https://a.supabase.co', 'key': 'k'}));
+      final omitted =
+          parseQrPayload(qr({'url': 'https://a.supabase.co', 'key': 'k'}));
       expect(omitted.ok, true);
       expect(omitted.bucket, kDefaultBucket);
 
-      final blank = parseQrPayload(qr({'url': 'https://a.supabase.co', 'key': 'k', 'bucket': '   '}));
+      final blank = parseQrPayload(
+          qr({'url': 'https://a.supabase.co', 'key': 'k', 'bucket': '   '}));
       expect(blank.ok, true);
       expect(blank.bucket, kDefaultBucket);
     });
@@ -53,7 +63,8 @@ void main() {
     test('rejects a non-https url (security: no attacker redirect)', () {
       final r = parseQrPayload(qr({'url': 'http://evil.example', 'key': 'k'}));
       expect(r.ok, false);
-      expect(r.error, 'Güvenlik: QR adresi https:// ile başlamıyor, reddedildi.');
+      expect(
+          r.error, 'Güvenlik: QR adresi https:// ile başlamıyor, reddedildi.');
     });
 
     test('rejects undecodable JSON with the format error', () {
@@ -70,7 +81,12 @@ void main() {
 
     test('ignores unexpected extra fields', () {
       final r = parseQrPayload(
-        qr({'url': 'https://a.supabase.co', 'key': 'k', 'bucket': 'b', 'evil': 'rm -rf'}),
+        qr({
+          'url': 'https://a.supabase.co',
+          'key': 'k',
+          'bucket': 'b',
+          'evil': 'rm -rf'
+        }),
       );
       expect(r.ok, true);
       expect(r.url, 'https://a.supabase.co');

@@ -9,6 +9,7 @@ export interface GlobalKeyRouterPorts {
   setStatus(message: string): void;
   log(message: string): void;
   error(message: string): void;
+  action?(name: string, details?: Readonly<Record<string, unknown>>): void;
 
   // commands
   startSelectionSession(): void;
@@ -30,6 +31,7 @@ export function createGlobalKeyRouter(ports: GlobalKeyRouterPorts): GlobalKeyRou
   return {
     route(event: string) {
       if (ports.isShutdownStarted()) return;
+      ports.action?.('keyboard.event', { event });
 
       if (event === 'READY') {
         ports.log('[main.ts] Keyboard hook registered successfully by key_listener.exe');

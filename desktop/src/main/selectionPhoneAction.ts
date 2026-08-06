@@ -20,6 +20,7 @@ export interface SelectionPhoneActionPorts<Image, ContextType> {
 
   resolveSelectionImage(): Promise<Image | null>;
   getImagePngBuffer(image: Image): Buffer;
+  reportError?(stage: string, error: unknown, details?: Readonly<Record<string, unknown>>): void;
 }
 
 export async function executeSelectionPhoneAction<Image, ContextType>(
@@ -28,6 +29,11 @@ export async function executeSelectionPhoneAction<Image, ContextType>(
 ): Promise<boolean> {
   const context = ports.getSupabaseContext();
   if (!context) {
+    ports.reportError?.(
+      'selection_upload_missing_settings',
+      new Error('Supabase URL or Anon Key is missing'),
+      { sessionId }
+    );
     ports.setStatus('Supabase ayarları eksik! Lütfen ayarlardan doldurun.');
     ports.setResponse('Hata: Supabase URL veya Anon Key tanımlanmamış. Ayarları kontrol edin.');
     ports.hideSelectionOverlay(sessionId);
@@ -86,6 +92,7 @@ export async function executeSelectionPhoneAction<Image, ContextType>(
     ports.activateTransientPill();
     return true;
   } catch (error: any) {
+    ports.reportError?.('selection_upload_failed', error, { sessionId });
     if (isCurrent()) {
       ports.setResponse(`Hata: ${error.message}`);
       ports.setStatus('Supabase yükleme hatası');

@@ -25,7 +25,7 @@ export interface AppSettings {
   /** Last floating panel position (screen coordinates). */
   panelX?: number;
   panelY?: number;
-  /** When true the panel stays expanded after the mouse leaves. */
+  /** When true the expanded panel stays above other application windows. */
   panelPinned?: boolean;
   /**
    * Floating pill visibility when idle.
@@ -80,7 +80,9 @@ export type MainReadyState = AppSettings & {
 
 export type MainBridgeAPI = {
   readonly ready: () => Promise<MainReadyState>;
-  readonly saveSettings: (settings: Partial<AppSettings>) => Promise<{ ok: boolean }>;
+  readonly saveSettings: (
+    settings: Partial<AppSettings>
+  ) => Promise<{ ok: boolean; error?: string }>;
   readonly generateQr: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
   readonly captureNow: () => Promise<{ ok: boolean; mode?: string }>;
   readonly openGemini: () => Promise<{ ok: boolean }>;
@@ -99,7 +101,7 @@ export type MainBridgeAPI = {
   readonly panelInteractStart: () => Promise<{ ok: boolean }>;
   readonly panelDragBy: (dx: number, dy: number) => Promise<{ ok: boolean }>;
   readonly panelDismiss: () => Promise<{ ok: boolean; mode: PanelMode }>;
-  readonly quitApp: () => Promise<{ ok: boolean }>;
+  readonly quitApp: () => Promise<{ ok: boolean; error?: string }>;
   readonly savePanelPinned: (pinned: boolean) => Promise<{ ok: boolean }>;
   readonly panelResizeCompact: (size: { width: number; height: number }) => Promise<{
     ok: boolean;
@@ -116,6 +118,7 @@ export type MainBridgeAPI = {
   readonly uploadFileToPhone: (filePath: string) => Promise<{ ok: boolean }>;
   readonly startDragDownloadedFile: (filePath: string) => void;
   readonly deleteDownloadedFile: (filePath: string) => Promise<{ ok: boolean }>;
+  readonly logUserAction: (action: string, details?: Readonly<Record<string, unknown>>) => void;
   readonly onPhoneDownloadsUpdated: (
     callback: (files: Array<{ path: string; name: string; isImage: boolean }>) => void
   ) => void;

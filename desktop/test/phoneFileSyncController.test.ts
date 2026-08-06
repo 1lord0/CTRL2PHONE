@@ -185,11 +185,11 @@ describe('phone file sync controller', () => {
     expect(fixture.errors).toHaveLength(0);
   });
 
-  it('rejects malformed realtime metadata before every downstream side effect', () => {
+  it('rejects malformed realtime metadata before every downstream side effect', async () => {
     // Given a subscribed controller and a valid-looking path with malformed metadata
     const fixture = createFixture();
     fixture.setRawFiles('[]');
-    fixture.controller.setup();
+    await fixture.controller.setup();
 
     try {
       // When the realtime boundary receives the malformed record
@@ -202,15 +202,15 @@ describe('phone file sync controller', () => {
       expect(fixture.deleted).toHaveLength(0);
       expect(fixture.notifications).toHaveLength(0);
     } finally {
-      fixture.controller.stop();
+      await fixture.controller.stopAndDrain();
     }
   });
 
-  it('rejects a non-text realtime name without a synchronous throw', () => {
+  it('rejects a non-text realtime name without a synchronous throw', async () => {
     // Given a subscribed controller with no polling records
     const fixture = createFixture();
     fixture.setRawFiles('[]');
-    fixture.controller.setup();
+    await fixture.controller.setup();
 
     try {
       // When the realtime boundary receives a non-text name
@@ -223,7 +223,7 @@ describe('phone file sync controller', () => {
       expect(fixture.deleted).toHaveLength(0);
       expect(fixture.notifications).toHaveLength(0);
     } finally {
-      fixture.controller.stop();
+      await fixture.controller.stopAndDrain();
     }
   });
 });

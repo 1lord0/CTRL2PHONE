@@ -1,4 +1,5 @@
 import { createClipboardSyncController } from '../src/main/clipboardSyncController';
+import { CLIPBOARD_CONTENT_MAX_LENGTH } from '../src/lib/supabaseSetup';
 
 interface FixtureContext {
   readonly generation: number;
@@ -94,6 +95,20 @@ describe('clipboard sync controller', () => {
       error: 'Supabase ayarları gönderim sırasında değişti',
     });
     expect(fixture.notifications).toHaveLength(0);
+  });
+
+  it('rejects oversized Unicode text before opening a Supabase context', async () => {
+    const fixture = createFixture();
+    fixture.setClipboardText('😀'.repeat(CLIPBOARD_CONTENT_MAX_LENGTH + 1));
+
+    const result = await fixture.controller.sendToPhone();
+
+    expect(result).toEqual({
+      ok: false,
+      error: `Pano metni en fazla ${CLIPBOARD_CONTENT_MAX_LENGTH} karakter olabilir`,
+    });
+    expect(fixture.inserted).toHaveLength(0);
+    expect(fixture.statuses.at(-1)).toBe(result.error);
   });
 
   it('copies each unseen mobile row once and always requests cleanup', async () => {

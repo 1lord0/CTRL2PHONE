@@ -5,7 +5,10 @@ import '../services/photo_sync_state.dart';
 import '../services/supabase_service.dart';
 
 class PhotosProvider extends ChangeNotifier {
-  final SupabaseService _service = SupabaseService();
+  final SupabaseService _service;
+  final GalleryCache _galleryCache;
+  final PhotoSyncState _syncState;
+  final DateTime Function() _now;
 
   List<Photo> _photos = [];
   bool _isLoading = false;
@@ -16,9 +19,22 @@ class PhotosProvider extends ChangeNotifier {
   bool _initialized = false;
   Set<String> _syncedKeys = {};
   Timer? _fallbackPoll;
+  String? _accountFingerprint;
+  int _listenerGeneration = 0;
+  bool _disposed = false;
 
   static const int _limit = 50;
   static const Duration _fallbackInterval = Duration(seconds: 15);
+
+  PhotosProvider({
+    SupabaseService? service,
+    GalleryCache? galleryCache,
+    PhotoSyncState? syncState,
+    DateTime Function()? now,
+  })  : _service = service ?? SupabaseService(),
+        _galleryCache = galleryCache ?? GalleryCache(),
+        _syncState = syncState ?? PhotoSyncState(),
+        _now = now ?? DateTime.now;
 
   List<Photo> get photos => _photos;
   bool get isLoading => _isLoading;
@@ -26,26 +42,41 @@ class PhotosProvider extends ChangeNotifier {
   String? get error => _error;
   bool get hasMore => _hasMore;
 
-  Future<void> initialize() async {
-    if (_initialized) return;
-    _syncedKeys = await PhotoSyncState.load();
-    _photos = await GalleryCache.load();
+  Future<void> initialize({String? accountFingerprint}) async {
+    final fingerprint =
+        accountFingerprint ?? SupabaseService.accountFingerprint;
+    if (fingerprint == null) return;
+    if (_initialized && _accountFingerprint == fingerprint) return;
+
+    final cachedFingerprint = await _galleryCache.loadFingerprint();
+    if (cachedFingerprint != fingerprint) {
+      await _galleryCache.clear();
+      await _syncState.clear();
+      await _galleryCache.saveFingerprint(fingerprint);
+    }
+
+    _accountFingerprint = fingerprint;
+    _syncedKeys = await _syncState.load();
+    _photos = await _galleryCache.load();
+    await _refreshExpiringPhotos();
     _initialized = true;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> _persistGallery() async {
-    await PhotoSyncState.save(_syncedKeys);
-    await GalleryCache.save(_photos);
+    await _syncState.save(_syncedKeys);
+    await _galleryCache.save(_photos);
+    final fingerprint = _accountFingerprint;
+    if (fingerprint != null) await _galleryCache.saveFingerprint(fingerprint);
   }
 
   void _markSynced(Photo photo) {
     _syncedKeys.add(PhotoSyncState.makeKeyFromPhoto(photo));
   }
 
-  bool _alreadyInGallery(Photo photo) {
+  int _galleryIndex(Photo photo) {
     final key = PhotoSyncState.makeKeyFromPhoto(photo);
-    return _photos.any(
+    return _photos.indexWhere(
       (p) =>
           p.id == photo.id ||
           p.storagePath == photo.storagePath ||
@@ -53,14 +84,22 @@ class PhotosProvider extends ChangeNotifier {
     );
   }
 
-  Future<void> _mergeNewPhotos(List<Photo> incoming, {bool prepend = true}) async {
+  Future<void> _mergeNewPhotos(List<Photo> incoming,
+      {bool prepend = true}) async {
     final fresh = <Photo>[];
+    var changed = false;
     for (final photo in incoming) {
-      if (_alreadyInGallery(photo)) continue;
-      fresh.add(photo);
+      final existing = _galleryIndex(photo);
+      if (existing >= 0) {
+        _photos[existing] = photo;
+        changed = true;
+      } else {
+        fresh.add(photo);
+        changed = true;
+      }
       _markSynced(photo);
     }
-    if (fresh.isEmpty) return;
+    if (!changed) return;
 
     if (prepend) {
       _photos.insertAll(0, fresh);
@@ -68,7 +107,37 @@ class PhotosProvider extends ChangeNotifier {
       _photos.addAll(fresh);
     }
     await _persistGallery();
-    notifyListeners();
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> _refreshExpiringPhotos() async {
+    var changed = false;
+    for (var index = 0; index < _photos.length; index++) {
+      final photo = _photos[index];
+      if (photo.hasUsableUrl(_now(),
+          refreshWindow: SupabaseService.signedUrlRefreshWindow)) {
+        continue;
+      }
+      try {
+        _photos[index] = await _service.refreshSignedUrl(photo);
+        changed = true;
+      } on SignedUrlException catch (error) {
+        _error = error.message;
+      }
+      if (_disposed) return;
+    }
+    if (changed) await _persistGallery();
+  }
+
+  Future<Photo> ensureFreshPhotoAt(int index) async {
+    final current = _photos[index];
+    final refreshed = await _service.ensureFreshPhoto(current);
+    if (!identical(refreshed, current)) {
+      _photos[index] = refreshed;
+      await _persistGallery();
+      if (!_disposed) notifyListeners();
+    }
+    return refreshed;
   }
 
   Future<void> loadPhotos({bool refresh = false}) async {
@@ -77,7 +146,7 @@ class PhotosProvider extends ChangeNotifier {
 
     _isLoading = true;
     _error = null;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
 
     try {
       if (refresh) {
@@ -99,16 +168,16 @@ class PhotosProvider extends ChangeNotifier {
       _error = e.toString();
     } finally {
       _isLoading = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
   Future<void> refresh() async {
     _isRefreshing = true;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
     await loadPhotos(refresh: true);
     _isRefreshing = false;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> loadMore() async {
@@ -142,41 +211,62 @@ class PhotosProvider extends ChangeNotifier {
 
   void clearError() {
     _error = null;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   /// Realtime push + 15s fallback — only new desktop uploads, no full gallery re-sign.
-  void listenForNewPhotos() {
-    _service.listenForBucketInserts((name) {
+  Future<void> listenForNewPhotos() async {
+    final generation = ++_listenerGeneration;
+    await _service.listenForBucketInserts((name) {
+      if (_disposed || generation != _listenerGeneration) return;
       if (name.startsWith('to_pc/')) return;
       final base = name.split('/').last;
       if (base.startsWith('.')) return;
       _addSinglePhoto(name);
     });
 
+    if (_disposed || generation != _listenerGeneration) {
+      await _service.stopBucketListener();
+      return;
+    }
+
     _fallbackPoll?.cancel();
     _fallbackPoll = Timer.periodic(_fallbackInterval, (_) => _pollNewPhotos());
   }
 
-  void stopRealtime() {
+  Future<void> stopRealtime() async {
+    _listenerGeneration++;
     _fallbackPoll?.cancel();
     _fallbackPoll = null;
-    _service.stopBucketListener();
+    await _service.stopBucketListener();
   }
 
-  Future<void> clearGalleryCache() async {
+  Future<void> clearGalleryCache({String? nextFingerprint}) async {
     _photos = [];
     _syncedKeys = {};
     _offset = 0;
     _hasMore = true;
-    await PhotoSyncState.clear();
-    await GalleryCache.clear();
-    notifyListeners();
+    await _syncState.clear();
+    await _galleryCache.clear();
+    _accountFingerprint = nextFingerprint;
+    if (nextFingerprint != null) {
+      await _galleryCache.saveFingerprint(nextFingerprint);
+    }
+    _initialized = false;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> prepareForAccount(String? nextFingerprint) async {
+    await stopRealtime();
+    if (_accountFingerprint != nextFingerprint) {
+      await clearGalleryCache(nextFingerprint: nextFingerprint);
+    }
   }
 
   @override
   void dispose() {
-    stopRealtime();
+    _disposed = true;
+    unawaited(stopRealtime());
     super.dispose();
   }
 }

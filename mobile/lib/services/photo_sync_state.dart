@@ -6,8 +6,13 @@ import 'supabase_service.dart';
 class PhotoSyncState {
   static const _keysPref = 'gallery_synced_keys';
   static const maxKeys = 2000;
+  final Future<SharedPreferences> Function() _preferences;
 
-  static String objectKey(String bucketRelativePath) => 'obj:$bucketRelativePath';
+  PhotoSyncState({Future<SharedPreferences> Function()? preferences})
+      : _preferences = preferences ?? SharedPreferences.getInstance;
+
+  static String objectKey(String bucketRelativePath) =>
+      'obj:$bucketRelativePath';
 
   static String makeKey(FileObject file) => objectKey(file.name);
 
@@ -18,14 +23,14 @@ class PhotoSyncState {
     return objectKey(rel);
   }
 
-  static Future<Set<String>> load() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<Set<String>> load() async {
+    final prefs = await _preferences();
     final list = prefs.getStringList(_keysPref) ?? [];
     return Set<String>.from(list);
   }
 
-  static Future<void> save(Set<String> keys) async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> save(Set<String> keys) async {
+    final prefs = await _preferences();
     final trimmed = keys.toList();
     if (trimmed.length > maxKeys) {
       trimmed.removeRange(0, trimmed.length - maxKeys);
@@ -33,8 +38,8 @@ class PhotoSyncState {
     await prefs.setStringList(_keysPref, trimmed);
   }
 
-  static Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> clear() async {
+    final prefs = await _preferences();
     await prefs.remove(_keysPref);
   }
 }

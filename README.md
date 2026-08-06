@@ -188,7 +188,9 @@ executables are ignored by Git and should not be committed.
 ### 🔒 Security Notes
 
 - **Use your Supabase Anon Key**, never the Service Key. The Service Key bypasses Row Level Security (RLS) and must never be put into a client app or a QR code.
+- **The anon key is a bearer capability for your dedicated Ctrl2Phone project.** Any paired client—or anyone who obtains that key—can select/delete clipboard rows and access bucket objects allowed by the generated policies. Rotate the key and re-pair after suspected exposure.
 - **Run the one-time security setup.** In the desktop app click the **🔒 Secure Setup (RLS)** button (labeled *"Güvenli Kurulum…"*): it copies a SQL snippet and opens your Supabase SQL Editor — paste it and press **Run**. It makes your bucket **private** and scopes the anon key to *only* that bucket.
+- The same setup creates the RLS-protected `clipboard_sync` table. Clipboard payloads are limited to **10,000 Unicode characters** and paired clients receive SELECT, INSERT, and DELETE access only; UPDATE is not granted.
 - The app reads images through **short-lived signed URLs** (not permanent public links), so the gallery keeps working after the bucket is private, and there is no forever-public handle to your screenshots. Filenames are random UUIDs, so they can't be enumerated.
 - ⚠️ **Until you run the setup SQL the bucket is PUBLIC** — anyone who learns your project URL + bucket name can read every screenshot. Treat the pairing QR code (which carries your anon key) like a password.
 - 📄 For assets, trust boundaries, attacker scenarios and residual risks, see the [**Threat Model**](docs/THREAT_MODEL.md).
@@ -196,6 +198,28 @@ executables are ignored by Git and should not be committed.
 <details><summary>The SQL the button runs (for bucket <code>screenshots</code>)</summary>
 
 ```sql
+create table if not exists public.clipboard_sync (
+  id uuid primary key default gen_random_uuid(),
+  content text not null,
+  source text not null check (source in ('desktop', 'mobile')),
+  created_at timestamptz not null default now(),
+  check (char_length(content) between 1 and 10000)
+);
+create index if not exists clipboard_sync_source_created_at_idx
+  on public.clipboard_sync (source, created_at asc);
+alter table public.clipboard_sync enable row level security;
+revoke all on table public.clipboard_sync from anon, authenticated;
+grant select, insert, delete on table public.clipboard_sync to anon, authenticated;
+
+create policy "ctrl2phone_clipboard_select" on public.clipboard_sync
+  for select to anon, authenticated using (true);
+create policy "ctrl2phone_clipboard_insert" on public.clipboard_sync
+  for insert to anon, authenticated with check (
+    source in ('desktop', 'mobile') and char_length(content) between 1 and 10000
+  );
+create policy "ctrl2phone_clipboard_delete" on public.clipboard_sync
+  for delete to anon, authenticated using (true);
+
 update storage.buckets set public = false where name = 'screenshots';
 
 create policy "ctrl2phone_select_screenshots" on storage.objects
@@ -228,7 +252,7 @@ The in-app button generates this for *your* actual bucket name. See [Supabase St
 2. Go to **Storage** → Create a new bucket (e.g., `screenshots`)
 3. Copy your **Project URL** and **anon key** from Settings → API
 4. Paste them into the Ctrl2Phone desktop app and click **Save settings**
-5. Click **🔒 Secure Setup (RLS)** and run the SQL it copies — this makes the bucket **private** and locks the anon key to this one bucket (see [Security Notes](#-security-notes))
+5. Click **🔒 Secure Setup (RLS)** and run the SQL it copies — this creates and protects `clipboard_sync`, makes the bucket **private**, and grants the paired clients only the required operations (see [Security Notes](#-security-notes))
 
 > ⚠️ Older versions told you to make the bucket **Public**. Don't — run the Secure Setup instead. The app reads images through short-lived **signed URLs**, so a private bucket works end-to-end and your screenshots are never world-readable.
 
@@ -298,7 +322,7 @@ flutter run
 2. **Storage** → Yeni bucket oluşturun (örn: `screenshots`)
 3. Settings → API'den **Project URL** ve **anon key** değerlerini kopyalayın
 4. Ctrl2Phone masaüstü uygulamasına yapıştırıp **Ayarları kaydet** deyin
-5. **🔒 Güvenli Kurulum (RLS)** butonuna basıp kopyalanan SQL'i çalıştırın — bu, bucket'ı **gizli** yapar ve anon anahtarını yalnızca bu bucket ile sınırlar (bkz. [Güvenlik Notları](#-güvenlik-notları))
+5. **🔒 Güvenli Kurulum (RLS)** butonuna basıp kopyalanan SQL'i çalıştırın — bu işlem `clipboard_sync` tablosunu oluşturup korur, bucket'ı **gizli** yapar ve eşleşmiş istemcilere yalnızca gereken işlemleri verir (bkz. [Güvenlik Notları](#-güvenlik-notları))
 
 > ⚠️ Eski sürümler bucket'ı **Public** yapmanızı söylüyordu. Yapmayın — bunun yerine Güvenli Kurulum'u çalıştırın. Uygulama görselleri kısa ömürlü **signed URL**'lerle okuduğu için gizli bucket uçtan uca çalışır ve ekran görüntüleriniz herkese açık olmaz.
 
@@ -335,11 +359,40 @@ tarafından yok sayılır; Git'e commit etmeyin.
 ### 🔒 Güvenlik Notları
 
 - **Supabase Service Key yerine Anon Key kullanın.** Service Key, Row Level Security (RLS) kurallarını bypass eder; bir client uygulamaya veya QR koduna **asla** konmamalıdır.
+- **Anon key, size ait Ctrl2Phone projesi için taşıyana yetki veren bir anahtardır.** Eşleşmiş istemciler veya anahtarı ele geçiren biri, üretilen politikaların izin verdiği bucket nesnelerine ve pano satırlarını okuma/silme işlemlerine erişebilir. Şüpheli sızıntıda anahtarı yenileyip telefonu tekrar eşleştirin.
 - **Tek seferlik güvenlik kurulumunu yapın.** Masaüstü uygulamasındaki **🔒 Güvenli Kurulum (RLS)** butonuna basın: bir SQL parçacığını panoya kopyalar ve Supabase SQL Editör'ü açar — yapıştırıp **Run** deyin. Bucket'ı **gizli** yapar ve anon anahtarını *yalnızca* o bucket ile sınırlar.
+- Aynı kurulum RLS korumalı `clipboard_sync` tablosunu oluşturur. Pano içeriği **10.000 Unicode karakterle** sınırlıdır; eşleşmiş istemcilere yalnızca SELECT, INSERT ve DELETE verilir, UPDATE verilmez.
 - Uygulama görselleri **kısa ömürlü signed URL**'lerle okur (kalıcı public link değil); böylece bucket gizli olunca da galeri çalışır ve ekran görüntülerine sonsuza dek açık bir bağlantı kalmaz. Dosya adları rastgele UUID'dir, tahmin/enumerasyon yapılamaz.
 - ⚠️ **Kurulum SQL'ini çalıştırana kadar bucket PUBLIC'tir** — proje URL'i + bucket adını öğrenen herkes tüm ekran görüntülerini okuyabilir. Eşleştirme QR kodunu (anon anahtarını taşır) bir şifre gibi koruyun.
 
 ---
+
+## Release signing prerequisites
+
+Production artifacts are intentionally blocked unless signing material is supplied. Local
+unsigned Windows packages use `npm run package:dev`; `npm run package` and
+`npm run package:release` require `CSC_LINK` (a PFX path or supported encoded certificate)
+and `CSC_KEY_PASSWORD`. Android debug builds do not require signing secrets, while Android
+release builds read either environment variables or an ignored
+`mobile/android/key.properties` copied from `mobile/android/key.properties.example`. For a
+local iOS release, install the distribution certificate and provisioning profile in Xcode's
+keychain/profile locations, then run `flutter build ipa --release
+--export-options-plist=/absolute/path/ExportOptions.plist`.
+
+GitHub release jobs require these repository secrets (values and certificate bytes must
+never be committed):
+
+- Windows: `WINDOWS_CERTIFICATE_BASE64`, `WINDOWS_CERTIFICATE_PASSWORD`
+- Android: `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+  `ANDROID_KEY_PASSWORD`
+- iOS: `IOS_CERTIFICATE_P12_BASE64`, `IOS_CERTIFICATE_PASSWORD`,
+  `IOS_PROVISIONING_PROFILE_BASE64`, `IOS_EXPORT_OPTIONS_PLIST_BASE64`,
+  `IOS_DEVELOPMENT_TEAM`
+
+The iOS export-options plist must map `com.ctrl2phone.app` to the supplied provisioning
+profile and use the intended distribution method. The workflows validate all code and tests
+before packaging, then fail with a named missing-secret error instead of publishing an
+unsigned release.
 
 ## 🛠️ Tech Stack
 

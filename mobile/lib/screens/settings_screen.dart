@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/photos_provider.dart';
+import '../services/connection_settings_store.dart';
 import '../services/supabase_service.dart';
 import '../services/qr_payload.dart';
 import 'home_screen.dart';
@@ -28,11 +30,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadCurrentSettings() async {
-    final prefs = await SharedPreferences.getInstance();
+    final settings = await ConnectionSettingsStore().load();
+    if (!mounted) return;
     setState(() {
-      _urlController.text = prefs.getString('supabase_url') ?? '';
-      _keyController.text = prefs.getString('supabase_anon_key') ?? '';
-      _bucketController.text = prefs.getString('supabase_bucket') ?? 'SCREENSHOTS';
+      _urlController.text = settings?.url ?? '';
+      _keyController.text = settings?.anonKey ?? '';
+      _bucketController.text = settings?.bucket ?? 'SCREENSHOTS';
     });
   }
 
@@ -52,27 +55,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
             searchOptions: const SearchOptions(limit: 1),
           );
 
-      // Başarılı ise SharedPreferences'a kaydet
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('supabase_url', url);
-      await prefs.setString('supabase_anon_key', key);
-      await prefs.setString('supabase_bucket', bucket);
+      final settings =
+          ConnectionSettings(url: url, anonKey: key, bucket: bucket);
+      await ConnectionSettingsStore().save(settings);
 
-      // Servis nesnesini ilklendir
-      SupabaseService.initClient(url, key, bucket);
+      if (!mounted) return;
+      final provider = context.read<PhotosProvider>();
+      await provider.prepareForAccount(settings.fingerprint);
+      await SupabaseService.clearClient();
+      SupabaseService.initClient(
+          settings.url, settings.anonKey, settings.bucket);
+      await provider.initialize(accountFingerprint: settings.fingerprint);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Ayarlar başarıyla kaydedildi!')),
         );
-        
+
         if (widget.isInitialSetup) {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const HomeScreen()),
           );
         } else {
-          Navigator.pop(context, true); // Değişiklik yapıldığını belirtmek için true dön
+          Navigator.pop(
+              context, true); // Değişiklik yapıldığını belirtmek için true dön
         }
       }
     } catch (e) {
@@ -85,7 +92,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -134,9 +141,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onPressed: () async {
                     final result = await Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const QrScannerScreen()),
+                      MaterialPageRoute(
+                          builder: (_) => const QrScannerScreen()),
                     );
-                    if (!mounted) return;
+                    if (!context.mounted) return;
                     if (result == null || result is! String) return;
 
                     final messenger = ScaffoldMessenger.of(context);
@@ -148,7 +156,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           content: Text(parsed.error ?? kQrFormatError),
                           // A malformed-QR message stays neutral; a rejected/incomplete
                           // payload is shown in red, exactly as before.
-                          backgroundColor: parsed.error == kQrFormatError ? null : Colors.red,
+                          backgroundColor: parsed.error == kQrFormatError
+                              ? null
+                              : Colors.red,
                         ),
                       );
                       return;
@@ -160,7 +170,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _bucketController.text = parsed.bucket;
                     });
                     messenger.showSnackBar(
-                      const SnackBar(content: Text('QR kod bilgileri başarıyla yüklendi!')),
+                      const SnackBar(
+                          content:
+                              Text('QR kod bilgileri başarıyla yüklendi!')),
                     );
                   },
                   icon: const Icon(Icons.qr_code_scanner_rounded),
@@ -184,8 +196,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     prefixIcon: Icon(Icons.link),
                   ),
                   validator: (val) {
-                    if (val == null || val.trim().isEmpty) return 'Lütfen URL girin';
-                    if (!val.startsWith('http')) return 'Geçersiz URL formatı';
+                    if (val == null || val.trim().isEmpty) {
+                      return 'Lütfen URL girin';
+                    }
+                    if (!val.startsWith('http')) {
+                      return 'Geçersiz URL formatı';
+                    }
                     return null;
                   },
                 ),
@@ -194,12 +210,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   controller: _keyController,
                   decoration: const InputDecoration(
                     labelText: 'Supabase Anon Key',
-                    helperText: 'Service Key DEĞİL — yalnızca Anon (public) anahtarı kullanın.',
+                    helperText:
+                        'Service Key DEĞİL — yalnızca Anon (public) anahtarı kullanın.',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.vpn_key),
                   ),
                   validator: (val) {
-                    if (val == null || val.trim().isEmpty) return 'Lütfen API anahtarı girin';
+                    if (val == null || val.trim().isEmpty) {
+                      return 'Lütfen API anahtarı girin';
+                    }
                     return null;
                   },
                 ),
@@ -213,7 +232,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     prefixIcon: Icon(Icons.folder),
                   ),
                   validator: (val) {
-                    if (val == null || val.trim().isEmpty) return 'Lütfen bucket adı girin';
+                    if (val == null || val.trim().isEmpty) {
+                      return 'Lütfen bucket adı girin';
+                    }
                     return null;
                   },
                 ),
@@ -232,9 +253,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2),
                         )
-                      : const Text('Kaydet ve Bağlan', style: TextStyle(fontSize: 16)),
+                      : const Text('Kaydet ve Bağlan',
+                          style: TextStyle(fontSize: 16)),
                 ),
               ],
             ),

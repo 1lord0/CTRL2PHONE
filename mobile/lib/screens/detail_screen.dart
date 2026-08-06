@@ -117,7 +117,8 @@ class _DetailScreenState extends State<DetailScreen> {
                     children: [
                       Icon(Icons.error, color: Colors.white, size: 48),
                       SizedBox(height: 8),
-                      Text('Fotoğraf yüklenemedi', style: TextStyle(color: Colors.white70)),
+                      Text('Fotoğraf yüklenemedi',
+                          style: TextStyle(color: Colors.white70)),
                     ],
                   ),
                 ),
@@ -147,7 +148,8 @@ class _DetailScreenState extends State<DetailScreen> {
                 children: [
                   // Sayı göstergesi
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.5),
                       borderRadius: BorderRadius.circular(16),
@@ -221,9 +223,8 @@ class _DetailScreenState extends State<DetailScreen> {
         }
       }
 
-      // Signed URL zaten benzersiz token taşır; ayrı cache-buster eklemek
-      // bağlantıyı bozar (çift '?'). Doğrudan kullan.
-      final url = Uri.parse(photo.url);
+      final freshPhoto = await SupabaseService().ensureFreshPhoto(photo);
+      final url = Uri.parse(freshPhoto.url);
       final response = await http.get(url);
 
       if (response.statusCode != 200) {
@@ -231,7 +232,8 @@ class _DetailScreenState extends State<DetailScreen> {
       }
 
       final tempDir = await getTemporaryDirectory();
-      final tempFile = File('${tempDir.path}/${photo.originalName ?? 'screenshot.jpg'}');
+      final tempFile =
+          File('${tempDir.path}/${photo.originalName ?? 'screenshot.jpg'}');
       await tempFile.writeAsBytes(response.bodyBytes);
 
       await Gal.putImage(tempFile.path);
@@ -242,7 +244,8 @@ class _DetailScreenState extends State<DetailScreen> {
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.check_circle_outline_rounded, color: Colors.greenAccent, size: 20),
+                const Icon(Icons.check_circle_outline_rounded,
+                    color: Colors.greenAccent, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -254,7 +257,8 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
             backgroundColor: const Color(0xFF141414),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
@@ -266,7 +270,8 @@ class _DetailScreenState extends State<DetailScreen> {
             content: Text('Hata: ${e.toString()}'),
             backgroundColor: const Color(0xFF2A2A2A),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
@@ -296,7 +301,8 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
               const Divider(color: Colors.white24),
               _buildInfoRow('Dosya Adı', photo.originalName ?? 'Bilinmiyor'),
-              _buildInfoRow('Boyut', '${photo.fileSize != null ? (photo.fileSize! / 1024).toStringAsFixed(1) : '?'} KB'),
+              _buildInfoRow('Boyut',
+                  '${photo.fileSize != null ? (photo.fileSize! / 1024).toStringAsFixed(1) : '?'} KB'),
               _buildInfoRow('Tür', photo.mimeType ?? 'image/jpeg'),
               _buildInfoRow('Yüklenme', _formatDate(photo.uploadedAt)),
               _buildInfoRow('Cihaz', photo.deviceId ?? 'Bilinmiyor'),

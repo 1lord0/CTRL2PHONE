@@ -34,7 +34,8 @@ class QrPayloadResult {
   }) =>
       QrPayloadResult._(ok: true, url: url, key: key, bucket: bucket);
 
-  factory QrPayloadResult.failure(String error) => QrPayloadResult._(ok: false, error: error);
+  factory QrPayloadResult.failure(String error) =>
+      QrPayloadResult._(ok: false, error: error);
 }
 
 /// Parse and validate a scanned pairing-QR payload (`{"url","key","bucket"}` JSON).
@@ -59,11 +60,13 @@ QrPayloadResult parseQrPayload(String raw) {
   final bucket = (decoded['bucket'] ?? '').toString().trim();
 
   if (url.isEmpty || key.isEmpty) {
-    return QrPayloadResult.failure('QR kodunda Supabase URL veya anahtar bulunamadı.');
+    return QrPayloadResult.failure(
+        'QR kodunda Supabase URL veya anahtar bulunamadı.');
   }
 
   if (!url.startsWith('https://')) {
-    return QrPayloadResult.failure('Güvenlik: QR adresi https:// ile başlamıyor, reddedildi.');
+    return QrPayloadResult.failure(
+        'Güvenlik: QR adresi https:// ile başlamıyor, reddedildi.');
   }
 
   return QrPayloadResult.success(

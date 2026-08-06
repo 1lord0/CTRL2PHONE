@@ -5,9 +5,14 @@ import 'supabase_service.dart';
 /// Persists the gallery list so cold starts do not re-sign every screenshot.
 class GalleryCache {
   static const _photosPref = 'gallery_photos_cache';
+  static const _fingerprintPref = 'gallery_account_fingerprint';
+  final Future<SharedPreferences> Function() _preferences;
 
-  static Future<List<Photo>> load() async {
-    final prefs = await SharedPreferences.getInstance();
+  GalleryCache({Future<SharedPreferences> Function()? preferences})
+      : _preferences = preferences ?? SharedPreferences.getInstance;
+
+  Future<List<Photo>> load() async {
+    final prefs = await _preferences();
     final raw = prefs.getString(_photosPref);
     if (raw == null || raw.isEmpty) return [];
     try {
@@ -20,14 +25,25 @@ class GalleryCache {
     }
   }
 
-  static Future<void> save(List<Photo> photos) async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> save(List<Photo> photos) async {
+    final prefs = await _preferences();
     final json = jsonEncode(photos.map((p) => p.toJson()).toList());
     await prefs.setString(_photosPref, json);
   }
 
-  static Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<String?> loadFingerprint() async {
+    final prefs = await _preferences();
+    return prefs.getString(_fingerprintPref);
+  }
+
+  Future<void> saveFingerprint(String fingerprint) async {
+    final prefs = await _preferences();
+    await prefs.setString(_fingerprintPref, fingerprint);
+  }
+
+  Future<void> clear({bool includeFingerprint = true}) async {
+    final prefs = await _preferences();
     await prefs.remove(_photosPref);
+    if (includeFingerprint) await prefs.remove(_fingerprintPref);
   }
 }

@@ -31,6 +31,7 @@ const bridge: MainBridgeAPI = {
   uploadFileToPhone: (filePath) => ipcRenderer.invoke('upload-file-to-phone', filePath),
   startDragDownloadedFile: (filePath) => ipcRenderer.send('start-drag-downloaded-file', filePath),
   deleteDownloadedFile: (filePath) => ipcRenderer.invoke('delete-downloaded-file', filePath),
+  logUserAction: (action, details) => ipcRenderer.send('diagnostics-user-action', action, details),
   onPhoneDownloadsUpdated: (callback) =>
     ipcRenderer.on('phone-downloads-updated', (_, files) => callback(files)),
 };

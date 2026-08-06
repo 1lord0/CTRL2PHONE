@@ -27,7 +27,7 @@ import {
   writeTextToClipboardReliable,
 } from './lib/clipboardWrite';
 import { resolveLang, getStrings } from './lib/i18n';
-import { validateAndResolveAssetPath } from './main/phoneDownloadAsset';
+import { createPhoneDownloadAssetStore } from './main/phoneDownloadAsset';
 import { attachStdinErrorGuard, bindLineReader, safeWriteStdin } from './lib/childProcess';
 import { executeCopySelection } from './lib/copySelection';
 import {
@@ -39,12 +39,11 @@ import { createDefaultSettings, createElectronSettingsStore } from './main/setti
 import { createSupabaseRuntime } from './main/supabaseRuntime';
 import { createElectronPhoneSyncState } from './main/phoneSyncState';
 import { createElectronNotificationController } from './main/notificationController';
-import {
-  createClipboardSyncController,
-  parseMobileClipboardRow,
-} from './main/clipboardSyncController';
+import { createClipboardSyncController } from './main/clipboardSyncController';
 import { createElectronGeminiWindowController } from './main/geminiWindowController';
 import { createPhoneFileSyncController } from './main/phoneFileSyncController';
+import { createElectronPhoneSyncAdapter } from './main/electronPhoneSyncAdapter';
+import { createElectronClipboardSyncAdapter } from './main/electronClipboardSyncAdapter';
 import {
   createSelectionSessionController,
   SelectionSessionController,
@@ -65,11 +64,7 @@ import {
 import { createNativePillHudController } from './main/nativePillHudController';
 import { createKeyListenerController } from './main/keyListenerController';
 import { createGlobalKeyRouter } from './main/globalKeyRouter';
-import {
-  createAppLifecycleController,
-  AppLifecycleController,
-  AppLifecycleControllerPorts,
-} from './main/appLifecycleController';
+import { createElectronLifecycleComposition } from './main/electronLifecycleComposition';
 
 // Actions
 import { resolveSelectionImage } from './main/selectionImageResolver';
@@ -85,13 +80,34 @@ import { registerStorageIpc } from './main/registerStorageIpc';
 import { registerFileIpc } from './main/registerFileIpc';
 import { registerGeminiIpc } from './main/registerGeminiIpc';
 import { createIpcSenderPolicy } from './main/ipcSenderPolicy';
+import { runPackagedSmoke } from './main/packagedSmoke';
+import { createDiagnosticsLogger } from './main/diagnosticsLogger';
+import { registerDiagnosticsIpc } from './main/registerDiagnosticsIpc';
 
 let downloadedPhoneFiles: string[] = [];
 let ocrInFlight = false;
 let storagePurgeInFlightGeneration: number | null = null;
 
+const packagedSmokeReportPath = process.env.CTRL2PHONE_PACKAGED_SMOKE_REPORT;
+const packagedSmokeUserData = process.env.CTRL2PHONE_PACKAGED_SMOKE_USER_DATA;
+if (packagedSmokeReportPath && packagedSmokeUserData) {
+  if (!path.isAbsolute(packagedSmokeReportPath) || !path.isAbsolute(packagedSmokeUserData)) {
+    throw new Error('Packaged smoke paths must be absolute.');
+  }
+  fs.mkdirSync(packagedSmokeUserData, { recursive: true });
+  app.setPath('userData', packagedSmokeUserData);
+}
+
+const diagnostics = createDiagnosticsLogger({
+  rootDir: path.join(app.getPath('userData'), 'diagnostics'),
+  appVersion: app.getVersion(),
+  packaged: app.isPackaged,
+});
+
 const settings = createDefaultSettings();
 const settingsStore = createElectronSettingsStore(settings);
+const phoneDownloadAssetStorePromise = createPhoneDownloadAssetStore(app.getPath('temp'));
+
 const supabaseRuntime = createSupabaseRuntime(settings, {
   createClient: (url, key) => {
     return createSupabaseClient(url, key, {
@@ -105,94 +121,29 @@ const supabaseRuntime = createSupabaseRuntime(settings, {
 });
 
 const phoneSyncState = createElectronPhoneSyncState();
-const phoneFileSyncController = createPhoneFileSyncController({
+const electronPhoneSyncAdapter = createElectronPhoneSyncAdapter({
   isEnabled: () => settings.autoCopyFromPhone,
-  getContext: () => supabaseRuntime.getContext(),
-  isContextCurrent: (context) => supabaseRuntime.isCurrent(context),
-  isSynced: (context, filePath, file) => phoneSyncState.isSynced(context, filePath, file),
-  markSynced: (context, filePath, file) => phoneSyncState.markSynced(context, filePath, file),
-  listRemoteFiles: async (context) => {
-    const { data, error } = await context.client.storage.from(context.bucket).list('to_pc', {
-      limit: 100,
-      sortBy: { column: 'created_at', order: 'desc' },
-    });
-    return {
-      files: (data ?? []).map((file: any) => ({
-        name: file.name,
-        id: file.id,
-        updated_at: file.updated_at,
-      })),
-      error: error?.message ?? null,
-    };
+  runtime: supabaseRuntime,
+  state: phoneSyncState,
+  downloadStore: phoneDownloadAssetStorePromise,
+  createImageFromBuffer: (buffer) => nativeImage.createFromBuffer(buffer),
+  writeClipboardImage: (image) => clipboard.writeImage(image),
+  guardLocalClipboard,
+  notifyDownloads: (paths) => notifyPhoneDownloads(paths),
+  log: (message) => {
+    diagnostics.info('phone_sync', 'runtime_message', { message });
+    console.log(message);
   },
-  downloadFile: async (context, file) => {
-    const tempDir = path.join(app.getPath('temp'), 'ctrl2phone');
-    const resolution = validateAndResolveAssetPath(file.name, tempDir);
-    if (!resolution.ok || !resolution.localPath) {
-      console.error(`Phone sync: rejected download name "${file.name}": ${resolution.error}`);
-      return null;
-    }
-    const localPath = resolution.localPath;
-
-    const remotePath = `to_pc/${file.name}`;
-    const { data: fileBlob, error } = await context.client.storage
-      .from(context.bucket)
-      .download(remotePath);
-    if (error) {
-      console.error(`Phone sync: failed to download ${remotePath}:`, error);
-      return null;
-    }
-    const arrayBuffer = await fileBlob.arrayBuffer();
-    if (!supabaseRuntime.isCurrent(context)) return null;
-    const buffer = Buffer.from(arrayBuffer);
-    const image = nativeImage.createFromBuffer(buffer);
-    if (image.isEmpty()) {
-      console.error('Phone sync: downloaded file is not a valid image (kept for retry)');
-      return null;
-    }
-
-    guardLocalClipboard(6000);
-    clipboard.writeImage(image);
-
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-    fs.writeFileSync(localPath, buffer);
-    return localPath;
+  warn: (message, detail) => {
+    diagnostics.warn('phone_sync', 'runtime_warning', { message, detail });
+    console.warn(message, detail ?? '');
   },
-  deleteRemoteFile: async (context, filePath) => {
-    if (!supabaseRuntime.isCurrent(context)) return null;
-    const { error } = await context.client.storage.from(context.bucket).remove([filePath]);
-    return error?.message ?? null;
+  error: (message, error) => {
+    diagnostics.error('phone_sync', 'runtime_error', error ?? message, { message });
+    console.error(message, error ?? '');
   },
-  notifyDownloads: (paths) => notifyPhoneDownloads([...paths]),
-  subscribe: (context, onFile, onSubscribed) => {
-    const channel = context.client
-      .channel(`ctrl2phone-to-pc-${context.generation}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'storage',
-          table: 'objects',
-          filter: `bucket_id=eq.${context.bucket}`,
-        },
-        (payload: { new?: { name?: string; id?: string; updated_at?: string } }) => {
-          const row = payload.new;
-          if (!row?.name) return;
-          onFile({ name: row.name, id: row.id, updated_at: row.updated_at });
-        }
-      )
-      .subscribe((status: any) => {
-        if (status === 'SUBSCRIBED') onSubscribed();
-      });
-    return { client: context.client, channel };
-  },
-  removeSubscription: async (subscription) => {
-    await subscription.client.removeChannel(subscription.channel);
-  },
-  log: (message) => console.log(message),
-  warn: (message, detail) => console.warn(message, detail ?? ''),
-  error: (message, error) => console.error(message, error),
 });
+const phoneFileSyncController = createPhoneFileSyncController(electronPhoneSyncAdapter.ports);
 
 const notificationController = createElectronNotificationController(() =>
   appLifecycle.isShutdownStarted()
@@ -200,42 +151,20 @@ const notificationController = createElectronNotificationController(() =>
 const geminiWindowController = createElectronGeminiWindowController(() =>
   appLifecycle.isShutdownStarted()
 );
-const clipboardSyncController = createClipboardSyncController({
-  readClipboard: () => clipboard.readText(),
-  writeClipboard: (value) => clipboard.writeText(value),
-  isClipboardGuarded: () => isLocalClipboardGuarded(),
-  getContext: () => supabaseRuntime.getContext(),
-  isContextCurrent: (context) => supabaseRuntime.isCurrent(context),
-  insertDesktopText: async (context, text) => {
-    const { error } = await context.client.from('clipboard_sync').insert({
-      content: text,
-      source: 'desktop',
-    });
-    return error?.message ?? null;
-  },
-  fetchOldestMobileText: async (context) => {
-    const { data, error } = await context.client
-      .from('clipboard_sync')
-      .select('*')
-      .eq('source', 'mobile')
-      .order('created_at', { ascending: true })
-      .limit(1);
-    return {
-      row: parseMobileClipboardRow(data?.[0]),
-      error: error?.message ?? null,
-    };
-  },
-  deleteMobileText: async (context, id) => {
-    const { error } = await context.client.from('clipboard_sync').delete().eq('id', id);
-    return error?.message ?? null;
-  },
-  setStatus,
-  setResponse,
-  showNotification: (title, body) => showCustomNotification(title, body, 'sync'),
-  log: (message) => console.log(message),
-  warn: (message, detail) => console.warn(message, detail ?? ''),
-  error: (message, error) => console.error(message, error),
-});
+const clipboardSyncController = createClipboardSyncController(
+  createElectronClipboardSyncAdapter({
+    runtime: supabaseRuntime,
+    readClipboard: () => clipboard.readText(),
+    writeClipboard: (value) => clipboard.writeText(value),
+    isClipboardGuarded: () => isLocalClipboardGuarded(),
+    setStatus,
+    setResponse,
+    showNotification: (title, body) => showCustomNotification(title, body, 'sync'),
+    log: (message) => console.log(message),
+    warn: (message, detail) => console.warn(message, detail ?? ''),
+    error: (message, error) => console.error(message, error),
+  })
+);
 
 const selectionSession: SelectionSessionController<Electron.NativeImage, Display> =
   createSelectionSessionController<Electron.NativeImage, Display>((): boolean =>
@@ -375,7 +304,7 @@ const mainWindowPorts: MainWindowControllerPorts<BrowserWindow, Display> = {
       skipTaskbar: true,
       focusable: true,
       backgroundColor: useNative ? '#0a1222' : WIN32_OPAQUE_PILL ? PILL_BG_COLOR : '#00000000',
-      title: '',
+      title: 'Ctrl2Phone',
       show: false,
       webPreferences: {
         preload: path.join(__dirname, 'preload-main.js'),
@@ -654,16 +583,9 @@ function sendKeyListenerConfig(): void {
   keyListenerController.sendConfig();
 }
 
-function setupPhoneSyncPolling(): void {
-  phoneFileSyncController.setup();
-}
-
-function setupClipboardPolling(): void {
-  clipboardSyncController.setupPolling();
-}
-
 function setStatus(message: string): void {
   const oneLine = message.replace(/\r?\n/g, ' ').trim();
+  diagnostics.info('status', 'status_changed', { message: oneLine });
   if (nativePillHudController.useNative() && mainWindowController.getPanelMode() === 'compact') {
     nativePillHudController.sendCommand(`STATUS:${oneLine}`);
     nativePillHudController.sendCommand('ACTIVE');
@@ -800,10 +722,26 @@ async function captureAndSendToSupabase(sessionId: number): Promise<boolean> {
     setResponse: (msg: string) => setResponse(msg),
     activateTransientPill: () => mainWindowController.activateTransientPill(),
     uploadToSupabase: async (context: any, fileName: string, buffer: Buffer) => {
-      return await context.client.storage.from(context.bucket).upload(fileName, buffer, {
+      const startedAt = Date.now();
+      diagnostics.action('supabase.selection_upload_started', {
+        sessionId,
+        bucket: context.bucket,
+        byteLength: buffer.length,
+        fileExtension: path.extname(fileName),
+      });
+      const result = await context.client.storage.from(context.bucket).upload(fileName, buffer, {
         contentType: 'image/png',
         upsert: true,
       });
+      if (!result.error) {
+        diagnostics.info('supabase', 'selection_upload_succeeded', {
+          sessionId,
+          bucket: context.bucket,
+          byteLength: buffer.length,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      return result;
     },
     createSignedUrl: async (context: any, fileName: string) => {
       const { data: signed } = await context.client.storage
@@ -816,6 +754,12 @@ async function captureAndSendToSupabase(sessionId: number): Promise<boolean> {
       return await resolveSelectionImage(snapshot, imageResolverPorts);
     },
     getImagePngBuffer: (image: Electron.NativeImage) => image.toPNG(),
+    reportError: (stage: string, error: unknown, details?: Record<string, unknown>) => {
+      diagnostics.error('supabase', stage, error, {
+        sessionId,
+        ...(details ?? {}),
+      });
+    },
   };
   return executeSelectionPhoneAction(sessionId, ports);
 }
@@ -864,11 +808,19 @@ async function captureAndOcr(sessionId: number): Promise<void> {
 async function uploadFileToPhone(filePath: string): Promise<boolean> {
   const context = supabaseRuntime.getContext();
   if (!context) {
+    diagnostics.error(
+      'supabase',
+      'file_upload_missing_settings',
+      new Error('Supabase URL or Anon Key is missing'),
+      { fileExtension: path.extname(filePath) },
+      'validation'
+    );
     setStatus('Supabase ayarları eksik! Lütfen ayarlardan doldurun.');
     mainWindowController.activateTransientPill();
     return false;
   }
   try {
+    const uploadStartedAt = Date.now();
     const fileStat = await fs.promises.stat(filePath);
     if (!fileStat.isFile()) {
       throw new Error('Dosya bulunamadı.');
@@ -877,6 +829,12 @@ async function uploadFileToPhone(filePath: string): Promise<boolean> {
     const baseName = path.basename(filePath);
     const cleanBaseName = baseName.replace(/[^a-zA-Z0-9.-]/g, '_');
     const fileName = `upload_${Date.now()}_${cleanBaseName}`;
+
+    diagnostics.action('supabase.file_upload_started', {
+      bucket: context.bucket,
+      byteLength: fileBuffer.length,
+      fileExtension: path.extname(baseName),
+    });
 
     setStatus("Dosya Supabase'e yükleniyor...");
     const { error } = await context.client.storage
@@ -887,6 +845,12 @@ async function uploadFileToPhone(filePath: string): Promise<boolean> {
     if (error) {
       throw new Error(`Upload hatası: ${error.message}`);
     }
+
+    diagnostics.info('supabase', 'file_upload_succeeded', {
+      bucket: context.bucket,
+      byteLength: fileBuffer.length,
+      durationMs: Date.now() - uploadStartedAt,
+    });
 
     let shareUrl = '';
     try {
@@ -907,6 +871,10 @@ async function uploadFileToPhone(filePath: string): Promise<boolean> {
     mainWindowController.activateTransientPill();
     return true;
   } catch (error: unknown) {
+    diagnostics.error('supabase', 'file_upload_failed', error, {
+      bucket: context.bucket,
+      fileExtension: path.extname(filePath),
+    });
     console.error('Failed to upload file to phone:', error);
     const message = error instanceof Error ? error.message : String(error);
     setStatus(`Yükleme başarısız: ${message}`);
@@ -990,6 +958,8 @@ const keyRouterPorts = {
   setStatus: (msg: string) => setStatus(msg),
   log: (msg: string) => console.log(msg),
   error: (msg: string) => console.error(msg),
+  action: (name: string, details?: Readonly<Record<string, unknown>>) =>
+    diagnostics.action(name, details),
   startSelectionSession,
   captureAndSend: () => {
     void captureAndSend(selectionSession.sessionId);
@@ -1012,31 +982,12 @@ const keyRouterPorts = {
     overlayWindowController.hide(sid);
     selectionSession.reset(sid);
   },
-  quitApplication: () => appLifecycle.beginShutdown() && app.quit(),
+  quitApplication: () => quitApplication(),
 };
-
-function cleanupPhoneSyncDownloads(): void {
-  const tempDir = path.join(app.getPath('temp'), 'ctrl2phone');
-  try {
-    if (fs.existsSync(tempDir)) {
-      const files = fs.readdirSync(tempDir);
-      for (const file of files) {
-        const filePath = path.join(tempDir, file);
-        try {
-          fs.unlinkSync(filePath);
-        } catch {
-          // ignore
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Failed to cleanup phone sync downloads:', err);
-  }
-}
 
 const globalKeyRouter = createGlobalKeyRouter(keyRouterPorts);
 
-const lifecyclePorts: AppLifecycleControllerPorts<typeof app, typeof screen> = {
+const lifecycleComposition = createElectronLifecycleComposition({
   app,
   screen,
   settingsStore,
@@ -1045,30 +996,57 @@ const lifecyclePorts: AppLifecycleControllerPorts<typeof app, typeof screen> = {
   overlayWindowController,
   keyListenerController,
   nativePillHudController,
-  cleanupStaleSelectionDragFiles: () => selectionDragAssetStore.cleanupStaleFiles(),
-  cleanupPhoneSyncDownloads: () => cleanupPhoneSyncDownloads(),
-  setupPhoneSyncPolling,
-  setupClipboardPolling,
-  stopPhoneSyncPolling: () => phoneFileSyncController.stop(),
-  stopClipboardPolling: () => clipboardSyncController.stopPolling(),
+  selectionDragAssetStore,
+  phoneDownloadAdapter: electronPhoneSyncAdapter,
+  phoneFileSyncController,
+  clipboardSyncController,
   externalCaptureDisplayCache,
   geminiWindowController,
   autoUpdater,
-  selectionSession: {
-    shutdown: () => selectionSession.shutdown(),
-  },
-  invalidateSelectionDragAsset: () => selectionDragAssetStore.invalidate(),
-  notificationController: {
-    shutdown: () => notificationController.shutdown(),
-  },
+  selectionSession,
+  notificationController,
   setTimeout: (cb: any, ms: number) => setTimeout(cb, ms),
   clearTimeout: (timer: any) => clearTimeout(timer),
   log: (msg: string) => console.log(msg),
   warn: (msg: string, e: any) => console.warn(msg, e),
   error: (msg: string, e: any) => console.error(msg, e),
-};
+});
 
-const appLifecycle: AppLifecycleController = createAppLifecycleController(lifecyclePorts);
+const appLifecycle = lifecycleComposition.controller;
+
+let explicitQuitStarted = false;
+
+function quitApplication(): void {
+  if (explicitQuitStarted) return;
+  explicitQuitStarted = true;
+  diagnostics.action('app.quit_requested');
+
+  // A stuck network/subscription drain must never turn the visible X button into
+  // a no-op. Prefer the graceful controller shutdown, but bound it and guarantee
+  // that the Electron process exits.
+  const forcedExitTimer = setTimeout(() => {
+    diagnostics.error(
+      'lifecycle',
+      'forced_shutdown_timeout',
+      new Error('Graceful shutdown exceeded 2500ms'),
+      undefined,
+      'shutdown'
+    );
+    diagnostics.close('forced_shutdown');
+    app.exit(0);
+  }, 2_500);
+  void appLifecycle
+    .beginShutdown()
+    .catch((error) => {
+      diagnostics.error('lifecycle', 'graceful_shutdown_failed', error, undefined, 'shutdown');
+      console.error('Graceful shutdown failed:', error);
+    })
+    .finally(() => {
+      clearTimeout(forcedExitTimer);
+      diagnostics.close('graceful_shutdown');
+      app.exit(0);
+    });
+}
 
 // IPC dependencies mapping
 const ipcDeps = {
@@ -1111,9 +1089,7 @@ const ipcDeps = {
   setStoragePurgeInFlightGeneration: (val: number | null) => {
     storagePurgeInFlightGeneration = val;
   },
-  quitApplication: () => {
-    appLifecycle.beginShutdown() && app.quit();
-  },
+  quitApplication,
   sendClipboardToPhone: () => clipboardSyncController.sendToPhone(),
 
   isMainSender: (sender: any) => ipcSenderPolicy.isMain(sender),
@@ -1144,8 +1120,9 @@ const ipcDeps = {
   writeTextToClipboardReliable: (txt: string) => writeTextToClipboardReliable(txt),
   shellOpenExternal: async (url: string) => await shell.openExternal(url),
   sendKeyListenerConfig,
-  setupPhoneSyncPolling,
-  setupClipboardPolling,
+  setupPhoneSyncPolling: lifecycleComposition.setupPhoneSyncPolling,
+  setupClipboardPolling: lifecycleComposition.setupClipboardPolling,
+  diagnostics,
 };
 
 // Register all IPC routes
@@ -1155,16 +1132,38 @@ registerPanelIpc(ipcMain, ipcDeps);
 registerStorageIpc(ipcMain, ipcDeps);
 registerFileIpc(ipcMain, ipcDeps);
 registerGeminiIpc(ipcMain, ipcDeps);
+registerDiagnosticsIpc(ipcMain, {
+  isMainSender: (sender) => ipcSenderPolicy.isMain(sender),
+  diagnostics,
+});
 
 // Last-resort safety net
 process.on('unhandledRejection', (reason) => {
+  diagnostics.error('process', 'unhandled_promise_rejection', reason);
   console.error('Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtExceptionMonitor', (error, origin) => {
+  diagnostics.error('process', 'uncaught_exception', error, { origin });
+});
+
+process.on('exit', (code) => {
+  diagnostics.close(`process_exit_${code}`);
 });
 
 // Auto-updater error registration
 autoUpdater.on('error', (err: any) => {
+  diagnostics.error('updater', 'auto_update_failed', err);
   console.error('Error in auto-updater:', err);
 });
 
 // Start the application
 appLifecycle.start();
+
+if (packagedSmokeReportPath) {
+  void runPackagedSmoke({
+    app,
+    mainWindowController,
+    reportPath: packagedSmokeReportPath,
+  });
+}

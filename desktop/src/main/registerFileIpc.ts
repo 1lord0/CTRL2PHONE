@@ -1,4 +1,6 @@
 import { IpcMain } from 'electron';
+import type { DiagnosticsLogger } from './diagnosticsLogger';
+import * as path from 'path';
 
 export interface FileIpcDeps {
   isShutdownStarted(): boolean;
@@ -11,6 +13,7 @@ export interface FileIpcDeps {
   createNativeImageFromPath(filePath: string): any;
   createNativeImageFromBuffer(buffer: Buffer): any;
   getDownloadedPhoneFiles(): string[];
+  diagnostics?: Pick<DiagnosticsLogger, 'action' | 'error'>;
 }
 
 export function registerFileIpc(ipc: IpcMain, deps: FileIpcDeps): () => void {
@@ -19,6 +22,9 @@ export function registerFileIpc(ipc: IpcMain, deps: FileIpcDeps): () => void {
     if (deps.isShutdownStarted() || typeof filePath !== 'string') {
       return { ok: false };
     }
+    deps.diagnostics?.action('file.upload_to_phone_requested', {
+      fileExtension: path.extname(filePath),
+    });
     const ok = await deps.uploadFileToPhone(filePath);
     return { ok };
   });
@@ -28,10 +34,16 @@ export function registerFileIpc(ipc: IpcMain, deps: FileIpcDeps): () => void {
     if (deps.isShutdownStarted()) return { ok: false };
     const filePath = deps.resolveMainWindowDownload(event.sender, requestedPath);
     if (!filePath) return { ok: false };
+    deps.diagnostics?.action('file.delete_download_requested', {
+      fileExtension: path.extname(filePath),
+    });
 
     try {
       await deps.unlinkFile(filePath);
     } catch (error) {
+      deps.diagnostics?.error('filesystem', 'download_delete_failed', error, {
+        fileExtension: path.extname(filePath),
+      });
       console.error('Failed to delete downloaded phone file:', error);
       return { ok: false };
     }
@@ -46,6 +58,9 @@ export function registerFileIpc(ipc: IpcMain, deps: FileIpcDeps): () => void {
     if (deps.isShutdownStarted()) return;
     const filePath = deps.resolveMainWindowDownload(event.sender, requestedPath);
     if (!filePath) return;
+    deps.diagnostics?.action('file.drag_started', {
+      fileExtension: path.extname(filePath),
+    });
     console.log('[main.ts] start-drag-downloaded-file:', filePath);
     let icon = deps.createNativeImageFromPath(filePath);
     if (icon.isEmpty()) {
@@ -76,6 +91,9 @@ export function registerFileIpc(ipc: IpcMain, deps: FileIpcDeps): () => void {
         icon: icon,
       });
     } catch (error) {
+      deps.diagnostics?.error('filesystem', 'download_drag_failed', error, {
+        fileExtension: path.extname(filePath),
+      });
       console.error('startDrag for downloaded file failed:', error);
     }
   };

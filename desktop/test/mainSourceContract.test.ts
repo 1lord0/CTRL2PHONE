@@ -22,7 +22,7 @@ describe('main process source contract', () => {
   it('contains composition root modules and appLifecycle start call', () => {
     const source = fs.readFileSync(mainSourcePath, 'utf8');
     
-    expect(source).toContain('createAppLifecycleController');
+    expect(source).toContain('createElectronLifecycleComposition');
     expect(source).toContain('registerSettingsIpc');
     expect(source).toContain('appLifecycle.start()');
   });

@@ -1,6 +1,15 @@
-import type { MainBridgeAPI } from './types';
+// Keep this file a browser-global script. A top-level import makes TypeScript emit
+// a CommonJS `exports` preamble, which crashes immediately in Chromium.
+const mainBridge = (window as any).bridge as import('./types').MainBridgeAPI;
+document.body.dataset.rendererCheckpoint = 'started';
 
-const bridge = window.bridge as MainBridgeAPI;
+function logUserAction(action: string, details?: Readonly<Record<string, unknown>>): void {
+  try {
+    mainBridge.logUserAction(action, details);
+  } catch {
+    // Diagnostics are best-effort and must never interrupt a user action.
+  }
+}
 
 const promptInput = document.getElementById('prompt') as HTMLTextAreaElement;
 const supabaseUrlInput = document.getElementById('supabaseUrl') as HTMLInputElement;
@@ -22,6 +31,7 @@ const responseNode = document.getElementById('response') as HTMLElement;
 const spotlightPanel = document.getElementById('spotlightPanel') as HTMLElement;
 const dismissPanelBtn = document.getElementById('dismissPanel') as HTMLButtonElement;
 const pinPanelBtn = document.getElementById('pinPanel') as HTMLButtonElement;
+const saveSettingsBtn = document.getElementById('saveSettings') as HTMLButtonElement;
 const qrCodeImage = document.getElementById('qrCodeImage') as HTMLImageElement;
 
 const storageContainer = document.getElementById('storageContainer') as HTMLElement;
@@ -76,7 +86,37 @@ function applyI18n(dict: Record<string, string>): void {
 let statusDirty = false;
 let responseDirty = false;
 let storageUsageRequestId = 0;
+let settingsSaveInFlight = false;
 let panelPinned = false;
+const supabaseDraft = {
+  url: '',
+  key: '',
+  bucket: '',
+};
+let supabaseDraftDirty = false;
+
+function bindSupabaseDraft(input: HTMLInputElement, field: keyof typeof supabaseDraft): void {
+  const capture = () => {
+    supabaseDraft[field] = input.value;
+    supabaseDraftDirty = true;
+  };
+  input.addEventListener('input', capture);
+  input.addEventListener('change', capture);
+  input.addEventListener('paste', (event: ClipboardEvent) => {
+    const pastedText = event.clipboardData?.getData('text') ?? '';
+    queueMicrotask(() => {
+      // Chromium can paint restored/autofilled text before exposing it through value.
+      // Preserve the actual paste payload as a fallback for that edge case.
+      supabaseDraft[field] = input.value || pastedText;
+      supabaseDraftDirty = true;
+    });
+  });
+}
+
+bindSupabaseDraft(supabaseUrlInput, 'url');
+bindSupabaseDraft(supabaseKeyInput, 'key');
+bindSupabaseDraft(supabaseBucketInput, 'bucket');
+document.body.dataset.rendererCheckpoint = 'supabase-draft-bound';
 
 function setPanelVisualMode(mode: 'compact' | 'presented'): void {
   document.body.dataset.panelMode = mode;
@@ -99,38 +139,38 @@ function bindChromeButton(
   handler: () => void | Promise<void>
 ): void {
   if (!btn) return;
-  let lastAt = 0;
   const run = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    const now = Date.now();
-    if (now - lastAt < 250) return;
-    lastAt = now;
-    void handler();
+    void Promise.resolve(handler()).catch((error) => {
+      console.error('Panel button action failed:', error);
+    });
   };
-  btn.addEventListener('pointerup', run);
   btn.addEventListener('click', run);
 }
 
 function initSpotlightPanel(): void {
   bindChromeButton(dismissPanelBtn, async () => {
-    await bridge.quitApp();
+    const result = await mainBridge.quitApp();
+    if (!result?.ok) {
+      showStatus(result?.error || t('status.genericError', 'Uygulama kapatılamadı.'));
+    }
   });
 
   bindChromeButton(pinPanelBtn, async () => {
     panelPinned = !panelPinned;
     updatePinUi();
-    await bridge.savePanelPinned(panelPinned);
+    await mainBridge.savePanelPinned(panelPinned);
   });
 
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape' && !panelPinned) {
       e.preventDefault();
-      await bridge.panelDismiss();
+      await mainBridge.panelDismiss();
     }
   });
 
-  bridge.onPanelMode((mode) => {
+  mainBridge.onPanelMode((mode) => {
     setPanelVisualMode(mode);
   });
 }
@@ -168,7 +208,7 @@ function showResponse(text: string): void {
 
 async function updateQrCode(): Promise<void> {
   try {
-    const result = await bridge.generateQr();
+    const result = await mainBridge.generateQr();
     if (result?.ok && result.dataUrl) {
       qrCodeImage.src = result.dataUrl;
       qrCodeImage.classList.remove('hidden');
@@ -184,7 +224,7 @@ async function updateQrCode(): Promise<void> {
 async function updateStorageUsage(): Promise<void> {
   const requestId = ++storageUsageRequestId;
   try {
-    const result = await bridge.getStorageUsage();
+    const result = await mainBridge.getStorageUsage();
     if (requestId !== storageUsageRequestId) return;
     if (
       result?.ok &&
@@ -215,9 +255,16 @@ async function updateStorageUsage(): Promise<void> {
 function loadSettings(state: any): void {
   applyI18n(state.i18n || {});
   promptInput.value = state.prompt || '';
-  supabaseUrlInput.value = state.supabaseUrl || '';
-  supabaseKeyInput.value = state.supabaseKey || '';
-  supabaseBucketInput.value = state.supabaseBucket || 'screenshots';
+  // Do not let a late app-ready/language refresh overwrite credentials the user
+  // has already typed or pasted while the IPC request was in flight.
+  if (!supabaseDraftDirty) {
+    supabaseUrlInput.value = state.supabaseUrl || '';
+    supabaseKeyInput.value = state.supabaseKey || '';
+    supabaseBucketInput.value = state.supabaseBucket || 'screenshots';
+    supabaseDraft.url = supabaseUrlInput.value;
+    supabaseDraft.key = supabaseKeyInput.value;
+    supabaseDraft.bucket = supabaseBucketInput.value;
+  }
   if (autoCopyFromPhoneInput) {
     autoCopyFromPhoneInput.checked = state.autoCopyFromPhone !== false;
   }
@@ -276,46 +323,61 @@ aiProviderInput?.addEventListener('change', updateAiProviderUi);
 // Switching the interface language persists it and re-renders from the freshly
 // resolved string map the main process returns.
 uiLanguageInput?.addEventListener('change', async () => {
-  await bridge.saveSettings({
+  await mainBridge.saveSettings({
     language: (uiLanguageInput.value as 'system' | 'en' | 'tr') || 'system',
   });
-  const state = await bridge.ready();
+  const state = await mainBridge.ready();
   loadSettings(state);
 });
 
 document.getElementById('quitApp')?.addEventListener('click', async () => {
-  await bridge.quitApp();
+  await mainBridge.quitApp();
 });
 
 initSpotlightPanel();
-bridge.ready().then((state) => {
+document.body.dataset.rendererCheckpoint = 'panel-bound';
+mainBridge.ready().then((state) => {
   loadSettings(state);
 });
 
-bridge.onStatus((message) => {
+mainBridge.onStatus((message) => {
   showStatus(message);
 });
 
-bridge.onResponse((message) => {
+mainBridge.onResponse((message) => {
   showResponse(message);
   // Trigger storage update whenever we finish sending something
   updateStorageUsage();
 });
 
-bridge.onOverlayMessage((message) => {
+mainBridge.onOverlayMessage((message) => {
   const overlayText = document.getElementById('overlayText');
   if (overlayText) {
     overlayText.textContent = message;
   }
 });
+document.body.dataset.rendererCheckpoint = 'bridge-events-bound';
 
-document.getElementById('saveSettings')?.addEventListener('click', async () => {
+async function saveSettingsFromForm(): Promise<void> {
+  if (settingsSaveInFlight) return;
+
+  const supabaseUrl = (supabaseUrlInput.value || supabaseDraft.url).trim();
+  const supabaseKey = (supabaseKeyInput.value || supabaseDraft.key).trim();
+  const supabaseBucket =
+    (supabaseBucketInput.value || supabaseDraft.bucket).trim() || 'screenshots';
+  const autoCopyFromPhone = autoCopyFromPhoneInput ? autoCopyFromPhoneInput.checked : false;
+  if (autoCopyFromPhone && (!supabaseUrl || !supabaseKey)) {
+    showStatus('Supabase URL ve Anon Key alanlarını birlikte doldurun.');
+    (!supabaseUrl ? supabaseUrlInput : supabaseKeyInput).focus();
+    return;
+  }
+
   const payload = {
     prompt: promptInput.value.trim(),
-    supabaseUrl: supabaseUrlInput.value.trim(),
-    supabaseKey: supabaseKeyInput.value.trim(),
-    supabaseBucket: supabaseBucketInput.value.trim() || 'screenshots',
-    autoCopyFromPhone: autoCopyFromPhoneInput ? autoCopyFromPhoneInput.checked : false,
+    supabaseUrl,
+    supabaseKey,
+    supabaseBucket,
+    autoCopyFromPhone,
     hotkeyVk: parseInt(hotkeyVkInput?.value ?? '162', 10) || 162,
     // Clamp to the range the C# listener accepts so the persisted/displayed value
     // can never diverge from the threshold actually in effect.
@@ -333,19 +395,110 @@ document.getElementById('saveSettings')?.addEventListener('click', async () => {
       (pillVisibilityInput?.value as 'always' | 'background' | 'capture-only') || 'always',
   };
 
-  const result = await bridge.saveSettings(payload);
+  settingsSaveInFlight = true;
+  saveSettingsBtn.disabled = true;
+  try {
+    const result = await mainBridge.saveSettings(payload);
 
-  if (result?.ok) {
-    showStatus(t('status.settingsSaved', 'Ayarlar kaydedildi'));
-    updateQrCode();
-    updateStorageUsage();
+    if (result?.ok) {
+      supabaseUrlInput.value = supabaseUrl;
+      supabaseKeyInput.value = supabaseKey;
+      supabaseBucketInput.value = supabaseBucket;
+      supabaseDraft.url = supabaseUrl;
+      supabaseDraft.key = supabaseKey;
+      supabaseDraft.bucket = supabaseBucket;
+      supabaseDraftDirty = false;
+      showStatus(t('status.settingsSaved', 'Ayarlar kaydedildi'));
+      updateQrCode();
+      updateStorageUsage();
+    } else {
+      showStatus(result?.error || t('status.genericError', 'Ayarlar kaydedilemedi.'));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showStatus(`${t('status.genericError', 'Ayarlar kaydedilemedi.')}: ${message}`);
+  } finally {
+    settingsSaveInFlight = false;
+    saveSettingsBtn.disabled = false;
   }
+}
+
+saveSettingsBtn.addEventListener('click', () => {
+  void saveSettingsFromForm();
 });
+saveSettingsBtn.dataset.handlerBound = 'true';
+document.body.dataset.rendererCheckpoint = 'save-bound';
+
+const diagnosticSafeEnumFields = new Set([
+  'aiProvider',
+  'uiLanguage',
+  'pillVisibility',
+  'hotkeyVk',
+  'doublePressMs',
+]);
+
+document.addEventListener(
+  'click',
+  (event) => {
+    const control = (event.target as Element | null)?.closest<HTMLElement>(
+      'button, [role="button"]'
+    );
+    if (!control) return;
+    logUserAction('ui.click', {
+      controlId: control.id || control.dataset.i18n || control.tagName.toLowerCase(),
+      panelMode: document.body.dataset.panelMode || 'unknown',
+    });
+  },
+  true
+);
+
+document.addEventListener(
+  'change',
+  (event) => {
+    const control = event.target;
+    if (
+      !(
+        control instanceof HTMLInputElement ||
+        control instanceof HTMLSelectElement ||
+        control instanceof HTMLTextAreaElement
+      )
+    ) {
+      return;
+    }
+    const details: Record<string, unknown> = {
+      controlId: control.id || control.name || control.tagName.toLowerCase(),
+      inputType: control instanceof HTMLInputElement ? control.type : control.tagName.toLowerCase(),
+      hasValue: control.value.length > 0,
+      valueLength: control.value.length,
+    };
+    if (control instanceof HTMLInputElement && control.type === 'checkbox') {
+      details.checked = control.checked;
+    }
+    if (diagnosticSafeEnumFields.has(control.id)) {
+      details.selectedValue = control.value;
+    }
+    logUserAction('ui.field_changed', details);
+  },
+  true
+);
+
+document.addEventListener(
+  'paste',
+  (event) => {
+    const control = event.target;
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement)) return;
+    logUserAction('ui.paste', {
+      controlId: control.id || control.name || control.tagName.toLowerCase(),
+      pastedLength: event.clipboardData?.getData('text').length ?? 0,
+    });
+  },
+  true
+);
 
 document.getElementById('setupRls')?.addEventListener('click', async () => {
   showStatus(t('status.rlsCopying', 'RLS SQL panoya kopyalanıyor...'));
   try {
-    const result = await bridge.setupRls();
+    const result = await mainBridge.setupRls();
     if (result?.ok) {
       showStatus(
         t(
@@ -383,7 +536,7 @@ document.getElementById('purgeStorage')?.addEventListener('click', async () => {
 
   showStatus(t('status.purging', 'Temizleniyor...'));
   try {
-    const result = await bridge.purgeStorage();
+    const result = await mainBridge.purgeStorage();
     if (result?.ok) {
       showStatus(
         t('status.purgeDone', 'Temizlik başarılı ({n} dosya silindi)').replace(
@@ -406,7 +559,7 @@ document.getElementById('purgeStorage')?.addEventListener('click', async () => {
 document.getElementById('sendClipboard')?.addEventListener('click', async () => {
   showStatus(t('status.sendingClipboard', 'Metin telefona gönderiliyor...'));
   try {
-    const result = await bridge.sendClipboard();
+    const result = await mainBridge.sendClipboard();
     if (!result?.ok) {
       showStatus(
         t('status.sendClipboardError', 'Gönderim hatası: ') +
@@ -417,6 +570,9 @@ document.getElementById('sendClipboard')?.addEventListener('click', async () => 
     showStatus(t('status.genericError', 'Hata: ') + e.message);
   }
 });
+
+document.body.dataset.rendererReady = 'true';
+document.body.dataset.rendererCheckpoint = 'ready';
 
 // NOT: Bu dosya bilinçli olarak global script'tir (overlay.ts gibi) — `export {}`
 // eklemeyin! Modül yapmak tsc'ye CommonJS önsözü (`exports` referansı) yazdırır ve

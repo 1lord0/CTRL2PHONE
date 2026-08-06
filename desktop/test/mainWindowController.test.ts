@@ -42,6 +42,7 @@ class MockMainWindow implements MainWindowPort {
   alwaysOnTop = false;
   alwaysOnTopLevel = '';
   alwaysOnTopRelative = 0;
+  skipTaskbar = true;
   ignoreMouseEvents = false;
   shown = false;
   focused = false;
@@ -78,6 +79,10 @@ class MockMainWindow implements MainWindowPort {
     this.alwaysOnTop = alwaysOnTop;
     this.alwaysOnTopLevel = level;
     this.alwaysOnTopRelative = relative;
+  }
+
+  setSkipTaskbar(skip: boolean) {
+    this.skipTaskbar = skip;
   }
 
   setIgnoreMouseEvents(ignore: boolean) {
@@ -219,6 +224,37 @@ describe('MainWindowController', () => {
     const modeMsg = mockWindow!.webContents.sentMessages.find(m => m.channel === 'panel-mode');
     expect(modeMsg).toBeDefined();
     expect(modeMsg!.args[0]).toBe('presented');
+    expect(mockWindow!.skipTaskbar).toBe(false);
+    expect(mockWindow!.alwaysOnTop).toBe(false);
+  });
+
+  it('keeps a pinned presented panel above other windows', async () => {
+    settings.panelPinned = true;
+    const controller = createMainWindowController(ports);
+    controller.init();
+    controller.presentSpotlight();
+    await flushPromises();
+
+    expect(mockWindow!.alwaysOnTop).toBe(true);
+    expect(mockWindow!.skipTaskbar).toBe(false);
+  });
+
+  it('keeps the presented panel open after focus moves to another application', async () => {
+    const controller = createMainWindowController(ports);
+    controller.init();
+    controller.presentSpotlight();
+    await flushPromises();
+
+    mockWindow!.focused = false;
+    mockWindow!.trigger('blur');
+
+    expect(controller.getPanelMode()).toBe('presented');
+    expect(mockWindow!.shown).toBe(true);
+    expect(mockWindow!.skipTaskbar).toBe(false);
+
+    controller.dismissSpotlight(true);
+    await flushPromises();
+    expect(mockWindow!.skipTaskbar).toBe(true);
   });
 
   it('keeps window always-on-top when selection or transient pill is active', () => {

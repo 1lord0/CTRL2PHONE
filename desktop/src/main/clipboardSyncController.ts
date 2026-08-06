@@ -1,3 +1,5 @@
+import { CLIPBOARD_CONTENT_MAX_LENGTH } from '../lib/supabaseSetup';
+
 export interface ClipboardSyncContext {
   readonly generation: number;
 }
@@ -53,6 +55,11 @@ export function createClipboardSyncController<Context extends ClipboardSyncConte
     if (!text) {
       ports.setStatus('Panoda kopyalanmış metin bulunamadı');
       return { ok: false, error: 'Panoda metin yok' };
+    }
+    if ([...text].length > CLIPBOARD_CONTENT_MAX_LENGTH) {
+      const error = `Pano metni en fazla ${CLIPBOARD_CONTENT_MAX_LENGTH} karakter olabilir`;
+      ports.setStatus(error);
+      return { ok: false, error };
     }
     const context = ports.getContext();
     if (!context) {

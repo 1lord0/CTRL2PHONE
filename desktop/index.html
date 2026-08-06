@@ -59,7 +59,14 @@
 
           <label>
             <span data-i18n="label.supabaseUrl">Supabase URL</span>
-            <input type="text" id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
+            <input
+              type="url"
+              id="supabaseUrl"
+              name="ctrl2phone-supabase-url"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="https://xxxx.supabase.co"
+            />
           </label>
 
           <label>
@@ -67,6 +74,9 @@
             <input
               type="password"
               id="supabaseKey"
+              name="ctrl2phone-supabase-anon-key"
+              autocomplete="new-password"
+              spellcheck="false"
               data-i18n-ph="ph.supabaseKey"
               placeholder="API Anahtarı girin..."
             />
@@ -74,7 +84,14 @@
 
           <label class="span-2">
             <span data-i18n="label.supabaseBucket">Supabase Bucket Name</span>
-            <input type="text" id="supabaseBucket" placeholder="screenshots" />
+            <input
+              type="text"
+              id="supabaseBucket"
+              name="ctrl2phone-supabase-bucket"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="screenshots"
+            />
           </label>
 
           <label class="span-2 checkbox-row">

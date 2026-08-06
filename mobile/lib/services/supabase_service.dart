@@ -3,67 +3,89 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'gallery_paging.dart';
 import 'photo_sync_state.dart';
+import 'connection_settings_store.dart';
+
+const int clipboardContentMaxLength = 10000;
+
+String? validateClipboardText(String text) {
+  if (text.trim().isEmpty) {
+    return 'Pano metni boş olamaz.';
+  }
+  if (text.runes.length > clipboardContentMaxLength) {
+    return 'Pano metni en fazla $clipboardContentMaxLength karakter olabilir.';
+  }
+  return null;
+}
 
 // ============================================================
 // Supabase Service: Dinamik Bağlantı + Storage Listeleme
 // ============================================================
 
 class SupabaseService {
+  static const signedUrlLifetime = Duration(hours: 6);
+  static const signedUrlRefreshWindow = Duration(minutes: 5);
   static SupabaseClient? _clientInstance;
   static String? _bucketName;
+  static String? _accountFingerprint;
   static RealtimeChannel? _galleryChannel;
+  final DateTime Function() _now;
+
+  SupabaseService({DateTime Function()? now}) : _now = now ?? DateTime.now;
 
   static bool get isInitialized => _clientInstance != null;
 
   static SupabaseClient? get client => _clientInstance;
+  static String? get accountFingerprint => _accountFingerprint;
 
   static void initClient(String url, String key, String bucket) {
     _clientInstance = SupabaseClient(url, key);
     _bucketName = bucket;
+    _accountFingerprint = connectionFingerprint(url, bucket);
   }
 
-  static void clearClient() {
-    final ch = _galleryChannel;
-    if (ch != null) {
-      _clientInstance?.removeChannel(ch);
-      _galleryChannel = null;
-    }
+  static Future<void> clearClient() async {
+    await unsubscribeClipboard();
+    await SupabaseService().stopBucketListener();
     _clientInstance = null;
     _bucketName = null;
+    _accountFingerprint = null;
   }
 
   /// Live updates: subscribe to INSERTs on this bucket's storage.objects so the
   /// gallery refreshes the instant the desktop uploads a screenshot. Requires
   /// the one-time setup SQL (publication + anon SELECT). No-op until configured.
-  void listenForBucketInserts(void Function(String name) onInsert) {
-    stopBucketListener();
+  Future<void> listenForBucketInserts(
+      void Function(String name) onInsert) async {
+    await stopBucketListener();
     final client = _clientInstance;
     if (client == null) return;
 
     final channel = client.channel('ctrl2phone-gallery');
-    channel.onPostgresChanges(
-      event: PostgresChangeEvent.insert,
-      schema: 'storage',
-      table: 'objects',
-      filter: PostgresChangeFilter(
-        type: PostgresChangeFilterType.eq,
-        column: 'bucket_id',
-        // bucket_id == bucket name for user-created Supabase buckets.
-        value: bucketName,
-      ),
-      callback: (payload) {
-        final name = payload.newRecord['name'] as String?;
-        if (name != null) onInsert(name);
-      },
-    ).subscribe();
+    channel
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'storage',
+          table: 'objects',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'bucket_id',
+            // bucket_id == bucket name for user-created Supabase buckets.
+            value: bucketName,
+          ),
+          callback: (payload) {
+            final name = payload.newRecord['name'] as String?;
+            if (name != null) onInsert(name);
+          },
+        )
+        .subscribe();
     _galleryChannel = channel;
   }
 
-  void stopBucketListener() {
+  Future<void> stopBucketListener() async {
     final ch = _galleryChannel;
     if (ch != null) {
-      _clientInstance?.removeChannel(ch);
       _galleryChannel = null;
+      await _clientInstance?.removeChannel(ch);
     }
   }
 
@@ -71,24 +93,49 @@ class SupabaseService {
   String get bucketName => _bucketName ?? 'SCREENSHOTS';
 
   Future<Photo> _buildPhotoFromFile(FileObject file) async {
-    String url;
-    try {
-      url = await _client!.storage
-          .from(bucketName)
-          .createSignedUrl(file.name, 60 * 60 * 6);
-    } catch (_) {
-      url = _client!.storage.from(bucketName).getPublicUrl(file.name);
-    }
-    return Photo(
+    final photo = Photo(
       id: file.id ?? file.name,
       storagePath: '$bucketName/${file.name}',
       originalName: file.name,
       fileSize: file.metadata?['size'] as int?,
       mimeType: file.metadata?['mimetype'] as String?,
-      uploadedAt: DateTime.parse(file.createdAt ?? DateTime.now().toIso8601String()),
+      uploadedAt:
+          DateTime.parse(file.createdAt ?? DateTime.now().toIso8601String()),
       deviceId: 'Desktop_App',
-      url: url,
     );
+    return refreshSignedUrl(photo);
+  }
+
+  Future<Photo> refreshSignedUrl(Photo photo) async {
+    final client = _client;
+    if (client == null) {
+      throw const SignedUrlException('Supabase bağlantısı etkin değil.');
+    }
+    final prefix = '$bucketName/';
+    final storageName = photo.storagePath.startsWith(prefix)
+        ? photo.storagePath.substring(prefix.length)
+        : photo.storagePath;
+    try {
+      final url = await client.storage
+          .from(bucketName)
+          .createSignedUrl(storageName, signedUrlLifetime.inSeconds);
+      return photo.copyWith(
+        url: url,
+        urlExpiresAt: _now().toUtc().add(signedUrlLifetime),
+      );
+    } catch (error) {
+      throw SignedUrlException(
+        'Özel bucket için signed URL oluşturulamadı. RLS ve bucket ayarlarını kontrol edin.',
+        error,
+      );
+    }
+  }
+
+  Future<Photo> ensureFreshPhoto(Photo photo) async {
+    if (photo.hasUsableUrl(_now(), refreshWindow: signedUrlRefreshWindow)) {
+      return photo;
+    }
+    return refreshSignedUrl(photo);
   }
 
   /// Lists bucket root and returns only photos not yet synced (no repeat signing).
@@ -97,16 +144,18 @@ class SupabaseService {
     int limit = 100,
   }) async {
     if (!isInitialized) {
-      throw Exception('Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
+      throw Exception(
+          'Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
     }
 
-    final List<FileObject> objects = await _client!.storage.from(bucketName).list(
-          searchOptions: SearchOptions(
-            limit: limit,
-            offset: 0,
-            sortBy: const SortBy(column: 'created_at', order: 'desc'),
-          ),
-        );
+    final List<FileObject> objects =
+        await _client!.storage.from(bucketName).list(
+              searchOptions: SearchOptions(
+                limit: limit,
+                offset: 0,
+                sortBy: const SortBy(column: 'created_at', order: 'desc'),
+              ),
+            );
 
     final files = objects.where((obj) => isVisiblePhotoName(obj.name)).toList();
     final photos = <Photo>[];
@@ -132,23 +181,13 @@ class SupabaseService {
     final pathKey = PhotoSyncState.objectKey(storageName);
     if (knownKeys.contains(pathKey)) return null;
 
-    String url;
-    try {
-      url = await _client!.storage
-          .from(bucketName)
-          .createSignedUrl(storageName, 60 * 60 * 6);
-    } catch (_) {
-      url = _client!.storage.from(bucketName).getPublicUrl(storageName);
-    }
-
-    return Photo(
+    return refreshSignedUrl(Photo(
       id: storageName,
       storagePath: '$bucketName/$storageName',
       originalName: base,
       uploadedAt: DateTime.now(),
       deviceId: 'Desktop_App',
-      url: url,
-    );
+    ));
   }
 
   /// Supabase Storage bucket'ından ekran görüntülerini listeler.
@@ -159,26 +198,27 @@ class SupabaseService {
     bool onlySignNew = false,
   }) async {
     if (!isInitialized) {
-      throw Exception('Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
+      throw Exception(
+          'Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
     }
 
     try {
-      final List<FileObject> objects = await _client!.storage
-          .from(bucketName)
-          .list(
-            searchOptions: SearchOptions(
-              limit: limit,
-              offset: offset,
-              sortBy: const SortBy(column: 'created_at', order: 'desc'),
-            ),
-          );
+      final List<FileObject> objects =
+          await _client!.storage.from(bucketName).list(
+                searchOptions: SearchOptions(
+                  limit: limit,
+                  offset: offset,
+                  sortBy: const SortBy(column: 'created_at', order: 'desc'),
+                ),
+              );
 
       // Sayfalamayı HAM sunucu sayısına göre yap (filtrelemeden önce); böylece
       // .keep / to_pc / gizli kayıtları gizlemek galeriyi erken kesmez.
       final bool hasMore = computeHasMore(objects.length, limit);
 
       // Filtreleme: Klasörler veya gizli sistem dosyalarını temizle (to_pc klasörü dahil)
-      final files = objects.where((obj) => isVisiblePhotoName(obj.name)).toList();
+      final files =
+          objects.where((obj) => isVisiblePhotoName(obj.name)).toList();
 
       final photos = <Photo>[];
       for (final file in files) {
@@ -194,6 +234,8 @@ class SupabaseService {
         hasMore: hasMore,
         fetchedCount: objects.length,
       );
+    } on SignedUrlException {
+      rethrow;
     } catch (e) {
       throw Exception('Ekran görüntüleri alınamadı: $e');
     }
@@ -202,7 +244,8 @@ class SupabaseService {
   /// Telefondan bilgisayara görsel göndermek için to_pc/ klasörüne yükler.
   Future<void> uploadToPC(Uint8List bytes, String fileName) async {
     if (!isInitialized) {
-      throw Exception('Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
+      throw Exception(
+          'Supabase henüz başlatılmadı. Lütfen ayarlardan kurulum yapın.');
     }
 
     try {
@@ -220,35 +263,25 @@ class SupabaseService {
     }
   }
 
-  /// Belirli bir fotoğrafın public URL'sini oluşturur.
-  String getPhotoUrl(String storagePath) {
-    if (!isInitialized) return '';
-    final fileName = storagePath.replaceFirst('$bucketName/', '');
-    return _client!.storage
-        .from(bucketName)
-        .getPublicUrl(fileName);
-  }
-
   /// Storage doluluğunu ve limitini döner (1 GB free tier limiti ile karşılaştırır)
   Future<Map<String, dynamic>> getStorageUsage() async {
     if (!isInitialized) {
-      return {'usedBytes': 0, 'limitBytes': 1024 * 1024 * 1024, 'percentage': 0.0};
+      return {
+        'usedBytes': 0,
+        'limitBytes': 1024 * 1024 * 1024,
+        'percentage': 0.0
+      };
     }
 
     try {
-      final List<FileObject> rootFiles = await _client!.storage.from(bucketName).list(
-            searchOptions: const SearchOptions(limit: 1000),
-          );
-      
-      List<FileObject> toPcFiles = [];
-      try {
-        toPcFiles = await _client!.storage.from(bucketName).list(
-              path: 'to_pc',
-              searchOptions: const SearchOptions(limit: 1000),
-            );
-      } catch (_) {
-        // ignore if folder does not exist
-      }
+      final client = _client!;
+      final bucket = bucketName;
+      final rootFiles = await _listAllStorageObjects(client, bucket);
+      final toPcFiles = await _listAllStorageObjects(
+        client,
+        bucket,
+        path: 'to_pc',
+      );
 
       int totalBytes = 0;
       for (final file in rootFiles) {
@@ -279,38 +312,50 @@ class SupabaseService {
     if (!isInitialized) return 0;
 
     try {
-      final List<FileObject> rootFiles = await _client!.storage.from(bucketName).list(
-            searchOptions: const SearchOptions(limit: 1000),
-          );
+      final client = _client!;
+      final bucket = bucketName;
+      final rootFiles = await _listAllStorageObjects(client, bucket);
+      final toPcFiles = await _listAllStorageObjects(
+        client,
+        bucket,
+        path: 'to_pc',
+      );
+      final filesToDelete = buildStorageDeletionPaths(
+        rootNames: rootFiles.map((file) => file.name),
+        toPcNames: toPcFiles.map((file) => file.name),
+      );
 
-      List<FileObject> toPcFiles = [];
-      try {
-        toPcFiles = await _client!.storage.from(bucketName).list(
-              path: 'to_pc',
-              searchOptions: const SearchOptions(limit: 1000),
-            );
-      } catch (_) {}
-
-      final List<String> filesToDelete = [];
-      for (final file in rootFiles) {
-        if (file.name != 'to_pc' && file.name != '.keep' && !file.name.startsWith('.')) {
-          filesToDelete.add(file.name);
-        }
-      }
-      for (final file in toPcFiles) {
-        if (file.name != '.keep' && !file.name.startsWith('.')) {
-          filesToDelete.add('to_pc/${file.name}');
-        }
-      }
-
-      if (filesToDelete.isNotEmpty) {
-        await _client!.storage.from(bucketName).remove(filesToDelete);
-      }
-
-      return filesToDelete.length;
+      return deleteStorageInBatches<String>(
+        items: filesToDelete,
+        deleteBatch: (batch) async {
+          final removed = await client.storage.from(bucket).remove(batch);
+          return removed.length;
+        },
+      );
+    } on StorageDeletionException {
+      rethrow;
     } catch (e) {
       throw Exception('Temizleme hatası: $e');
     }
+  }
+
+  Future<List<FileObject>> _listAllStorageObjects(
+    SupabaseClient client,
+    String bucket, {
+    String? path,
+  }) {
+    final storage = client.storage.from(bucket);
+    return collectOffsetPages<FileObject>(
+      fetchPage: (offset, limit) => storage.list(
+        path: path,
+        searchOptions: SearchOptions(
+          limit: limit,
+          offset: offset,
+          sortBy: const SortBy(column: 'name', order: 'asc'),
+        ),
+      ),
+      keyOf: (file) => file.name,
+    );
   }
 
   // ============================================================
@@ -319,67 +364,80 @@ class SupabaseService {
 
   static Timer? _clipboardTimer;
   static bool _isPollingClipboard = false;
+  static Future<void>? _clipboardInFlight;
+  static int _clipboardGeneration = 0;
   static String? _lastProcessedClipboardId;
 
   /// Masaüstünden gelen metinleri dinlemek için 1.5 saniyelik polling başlatır.
   /// [onReceived] callback'i yeni metin geldiğinde çağrılır.
-  static void subscribeToClipboard(void Function(String content) onReceived) {
+  static Future<void> subscribeToClipboard(
+      void Function(String content) onReceived) async {
     if (!isInitialized || _clientInstance == null) return;
 
-    // Önce mevcut polling'i kapat
-    unsubscribeClipboard();
+    await unsubscribeClipboard();
+    final generation = ++_clipboardGeneration;
+    final client = _clientInstance!;
 
-    _clipboardTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) async {
+    _clipboardTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (_isPollingClipboard) return;
       _isPollingClipboard = true;
+      final operation = () async {
+        try {
+          final List<dynamic> response = await client
+              .from('clipboard_sync')
+              .select()
+              .eq('source', 'desktop')
+              .order('created_at', ascending: true)
+              .limit(1);
 
-      try {
-        final List<dynamic> response = await _clientInstance!
-            .from('clipboard_sync')
-            .select()
-            .eq('source', 'desktop')
-            .order('created_at', ascending: true)
-            .limit(1);
+          if (generation != _clipboardGeneration) return;
+          if (response.isNotEmpty) {
+            final row = response.first;
+            final id = row['id'] as String?;
+            if (id != _lastProcessedClipboardId) {
+              _lastProcessedClipboardId = id;
+              final content = row['content'] as String?;
+              if (content != null && content.isNotEmpty) {
+                onReceived(content);
+              }
+            }
 
-        if (response.isNotEmpty) {
-          final row = response.first;
-          final id = row['id'] as String?;
-          if (id != _lastProcessedClipboardId) {
-            _lastProcessedClipboardId = id;
-            final content = row['content'] as String?;
-            if (content != null && content.isNotEmpty) {
-              onReceived(content);
+            if (id != null && generation == _clipboardGeneration) {
+              await client.from('clipboard_sync').delete().eq('id', id);
             }
           }
-
-          if (id != null) {
-            await _clientInstance!
-                .from('clipboard_sync')
-                .delete()
-                .eq('id', id);
-          }
+        } catch (e) {
+          debugPrint('Clipboard polling error: $e');
+        } finally {
+          _isPollingClipboard = false;
         }
-      } catch (e) {
-        debugPrint('Clipboard polling error: $e');
-      } finally {
-        _isPollingClipboard = false;
-      }
+      }();
+      _clipboardInFlight = operation;
+      operation.whenComplete(() {
+        if (identical(_clipboardInFlight, operation)) _clipboardInFlight = null;
+      });
     });
 
     debugPrint('Clipboard polling initialized (1.5s)');
   }
 
   /// Polling'i kapatır.
-  static void unsubscribeClipboard() {
-    if (_clipboardTimer != null) {
-      _clipboardTimer!.cancel();
-      _clipboardTimer = null;
-      debugPrint('Clipboard polling stopped');
-    }
+  static Future<void> unsubscribeClipboard() async {
+    _clipboardGeneration++;
+    _clipboardTimer?.cancel();
+    _clipboardTimer = null;
+    await _clipboardInFlight;
+    _clipboardInFlight = null;
+    _isPollingClipboard = false;
+    debugPrint('Clipboard polling stopped');
   }
 
   /// Telefondaki metni masaüstüne göndermek için clipboard_sync tablosuna INSERT eder.
   Future<void> sendClipboardText(String text) async {
+    final validationError = validateClipboardText(text);
+    if (validationError != null) {
+      throw Exception(validationError);
+    }
     if (!isInitialized) {
       throw Exception('Supabase henüz başlatılmadı.');
     }
@@ -429,6 +487,7 @@ class Photo {
 
   /// Görüntüleme/indirme için çözülmüş (signed veya public) URL.
   final String url;
+  final DateTime? urlExpiresAt;
 
   Photo({
     required this.id,
@@ -439,7 +498,28 @@ class Photo {
     required this.uploadedAt,
     this.deviceId,
     this.url = '',
+    this.urlExpiresAt,
   });
+
+  bool hasUsableUrl(DateTime now,
+      {Duration refreshWindow = const Duration(minutes: 5)}) {
+    final expiry = urlExpiresAt;
+    return url.isNotEmpty &&
+        expiry != null &&
+        expiry.isAfter(now.toUtc().add(refreshWindow));
+  }
+
+  Photo copyWith({String? url, DateTime? urlExpiresAt}) => Photo(
+        id: id,
+        storagePath: storagePath,
+        originalName: originalName,
+        fileSize: fileSize,
+        mimeType: mimeType,
+        uploadedAt: uploadedAt,
+        deviceId: deviceId,
+        url: url ?? this.url,
+        urlExpiresAt: urlExpiresAt ?? this.urlExpiresAt,
+      );
 
   factory Photo.fromJson(Map<String, dynamic> json) {
     return Photo(
@@ -451,6 +531,9 @@ class Photo {
       uploadedAt: DateTime.parse(json['uploaded_at'] as String),
       deviceId: json['device_id'] as String?,
       url: json['url'] as String? ?? '',
+      urlExpiresAt: json['url_expires_at'] == null
+          ? null
+          : DateTime.tryParse(json['url_expires_at'] as String),
     );
   }
 
@@ -463,5 +546,16 @@ class Photo {
         'uploaded_at': uploadedAt.toIso8601String(),
         'device_id': deviceId,
         'url': url,
+        'url_expires_at': urlExpiresAt?.toUtc().toIso8601String(),
       };
+}
+
+class SignedUrlException implements Exception {
+  final String message;
+  final Object? cause;
+
+  const SignedUrlException(this.message, [this.cause]);
+
+  @override
+  String toString() => message;
 }

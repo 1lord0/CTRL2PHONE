@@ -8,6 +8,7 @@ export interface MainWindowPort {
   setMaximumSize(width: number, height: number): void;
   setResizable(resizable: boolean): void;
   setAlwaysOnTop(alwaysOnTop: boolean, level?: any, relative?: number): void;
+  setSkipTaskbar(skip: boolean): void;
   setIgnoreMouseEvents(ignore: boolean): void;
   show(): void;
   hide(): void;
@@ -221,22 +222,6 @@ export function createMainWindowController<
         });
       }
 
-      mainWindow.on('blur', () => {
-        setTimeout(() => {
-          if (
-            isWindowUsable(mainWindow) &&
-            !mainWindow.isFocused() &&
-            panelMode === 'presented' &&
-            !ports.getSettings().panelPinned &&
-            !ports.isSelectionSessionActive() &&
-            !ports.isSelectionSessionStarting() &&
-            !pillHudElevated
-          ) {
-            self.dismissSpotlight();
-          }
-        }, 220);
-      });
-
       mainWindow.webContents.on('did-finish-load', () => {
         self.broadcastPanelMode();
         if (
@@ -428,6 +413,7 @@ export function createMainWindowController<
       if (!isWindowUsable(mainWindow)) return;
       mainWindow.setIgnoreMouseEvents(false);
       if (mode === 'compact') {
+        mainWindow.setSkipTaskbar(true);
         const pill = self.clampPillBounds(bounds);
         compactPillSize = { width: pill.width, height: pill.height };
         mainWindow.setBackgroundColor(compactPillBackgroundColor());
@@ -438,6 +424,7 @@ export function createMainWindowController<
         self.applyWindowShape('compact');
         return;
       }
+      mainWindow.setSkipTaskbar(false);
       mainWindow.setBackgroundColor(presentedPanelBackgroundColor());
       const panel = self.clampPresentedBounds(bounds);
       mainWindow.setResizable(true);
@@ -539,7 +526,7 @@ export function createMainWindowController<
       panelMode = 'presented';
       const panelBounds = self.spotlightCenterBounds();
       self.applyPanelBounds(panelBounds, 'presented');
-      mainWindow.setAlwaysOnTop(true);
+      mainWindow.setAlwaysOnTop(Boolean(ports.getSettings().panelPinned));
       self.broadcastPanelMode();
       void self.loadMainWindowPage('panel').then(() => {
         if (!isWindowUsable(mainWindow)) return;

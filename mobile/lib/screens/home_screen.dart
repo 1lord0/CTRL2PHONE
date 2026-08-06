@@ -2,13 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/connection_settings_store.dart';
 import '../services/supabase_service.dart';
 import '../providers/photos_provider.dart';
 import '../widgets/photo_card.dart';
 import 'detail_screen.dart';
 import 'settings_screen.dart';
-
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,7 +19,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final ScrollController _scrollController;
   Map<String, dynamic>? _storageUsage;
-  bool _loadingStorage = false;
 
   @override
   void initState() {
@@ -30,22 +28,23 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<PhotosProvider>();
       await provider.initialize();
-      provider.listenForNewPhotos();
+      await provider.listenForNewPhotos();
       if (provider.photos.isEmpty) {
         await provider.loadPhotos();
       } else {
         await provider.loadPhotos(refresh: true);
       }
       _fetchStorageUsage();
-      _startClipboardListener();
+      await _startClipboardListener();
     });
   }
 
-  void _startClipboardListener() {
-    SupabaseService.subscribeToClipboard((content) {
+  Future<void> _startClipboardListener() async {
+    await SupabaseService.subscribeToClipboard((content) {
       Clipboard.setData(ClipboardData(text: content));
       if (mounted) {
-        final preview = content.length > 80 ? '${content.substring(0, 80)}...' : content;
+        final preview =
+            content.length > 80 ? '${content.substring(0, 80)}...' : content;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
@@ -66,22 +65,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchStorageUsage() async {
     if (!mounted) return;
-    setState(() => _loadingStorage = true);
     try {
       final usage = await SupabaseService().getStorageUsage();
       if (mounted) {
-        setState(() {
-          _storageUsage = usage;
-          _loadingStorage = false;
-        });
+        setState(() => _storageUsage = usage);
       }
     } catch (e) {
       debugPrint('Failed to fetch storage usage: $e');
-      if (mounted) {
-        setState(() => _loadingStorage = false);
-      }
     }
   }
+
   Future<void> _purgeStorage() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -104,18 +97,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (confirm == true && mounted) {
-      setState(() => _loadingStorage = true);
       try {
         final count = await SupabaseService().purgeStorage();
         if (mounted) {
+          final provider = context.read<PhotosProvider>();
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Temizlik başarılı! $count dosya silindi.'),
               backgroundColor: Colors.green,
             ),
           );
-          await context.read<PhotosProvider>().clearGalleryCache();
-          await context.read<PhotosProvider>().refresh();
+          await provider.clearGalleryCache();
+          await provider.refresh();
+          if (!mounted) return;
           _fetchStorageUsage();
         }
       } catch (e) {
@@ -126,7 +120,6 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: Colors.red,
             ),
           );
-          setState(() => _loadingStorage = false);
         }
       }
     }
@@ -153,12 +146,23 @@ class _HomeScreenState extends State<HomeScreen> {
     ]);
   }
 
-  void _onPhotoTap(List<Photo> photos, int index) {
+  Future<void> _onPhotoTap(PhotosProvider provider, int index) async {
+    try {
+      await provider.ensureFreshPhotoAt(index);
+    } on SignedUrlException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => DetailScreen(
-          photos: photos,
+          photos: List<Photo>.from(provider.photos),
           initialIndex: index,
         ),
       ),
@@ -187,12 +191,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (confirm == true && mounted) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('supabase_url');
-      await prefs.remove('supabase_anon_key');
-      await prefs.remove('supabase_bucket');
-
-      SupabaseService.clearClient();
+      final provider = context.read<PhotosProvider>();
+      await provider.prepareForAccount(null);
+      await SupabaseService.clearClient();
+      await ConnectionSettingsStore().clear();
 
       if (mounted) {
         Navigator.pushAndRemoveUntil(
@@ -231,7 +233,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SettingsScreen(isInitialSetup: false)),
               );
               if (result == true) {
-                provider.refresh();
+                await provider.initialize();
+                await provider.refresh();
+                await provider.listenForNewPhotos();
               }
             },
           ),
@@ -276,9 +280,10 @@ class _HomeScreenState extends State<HomeScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4) ?? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+        border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -289,13 +294,15 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: Row(
                   children: [
-                    Icon(Icons.cloud_queue_rounded, size: 16, color: theme.colorScheme.primary),
+                    Icon(Icons.cloud_queue_rounded,
+                        size: 16, color: theme.colorScheme.primary),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         'Supabase Depolama',
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
@@ -306,11 +313,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Text(
                     '${usedMb.toStringAsFixed(1)} MB / ${limitMb.toStringAsFixed(0)} MB (%${pct.toStringAsFixed(1)})',
-                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(width: 4),
                   IconButton(
-                    icon: Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.red.shade400),
+                    icon: Icon(Icons.delete_sweep_rounded,
+                        size: 18, color: Colors.red.shade400),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                     tooltip: 'Temizle',
@@ -325,9 +334,11 @@ class _HomeScreenState extends State<HomeScreen> {
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: pct / 100,
-              backgroundColor: theme.colorScheme.surfaceContainerHighest ?? theme.colorScheme.surfaceContainerHighest,
+              backgroundColor: theme.colorScheme.surfaceContainerHighest,
               valueColor: AlwaysStoppedAnimation<Color>(
-                pct > 90 ? Colors.red : (pct > 75 ? Colors.orange : theme.colorScheme.primary),
+                pct > 90
+                    ? Colors.red
+                    : (pct > 75 ? Colors.orange : theme.colorScheme.primary),
               ),
               minHeight: 6,
             ),
@@ -403,7 +414,8 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisSpacing: 2,
           childAspectRatio: 1.0,
         ),
-        itemCount: provider.photos.length + (provider.isLoading && provider.photos.isNotEmpty ? 1 : 0),
+        itemCount: provider.photos.length +
+            (provider.isLoading && provider.photos.isNotEmpty ? 1 : 0),
         itemBuilder: (ctx, index) {
           if (index == provider.photos.length) {
             return const Center(
@@ -417,7 +429,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           return PhotoCard(
             imageUrl: photo.url,
-            onTap: () => _onPhotoTap(provider.photos, index),
+            onTap: () => _onPhotoTap(provider, index),
           );
         },
       ),
@@ -435,11 +447,13 @@ class _HomeScreenState extends State<HomeScreen> {
       if (image == null) return;
 
       if (!mounted) return;
-      _showUploadDialog(context, message: 'Fotoğraf bilgisayara gönderiliyor...');
+      _showUploadDialog(context,
+          message: 'Fotoğraf bilgisayara gönderiliyor...');
 
       final bytes = await image.readAsBytes();
       final extension = image.path.split('.').last.toLowerCase();
-      final fileName = 'upload_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      final fileName =
+          'upload_${DateTime.now().millisecondsSinceEpoch}.$extension';
       await SupabaseService().uploadToPC(bytes, fileName);
 
       if (!mounted) return;
@@ -474,21 +488,23 @@ class _HomeScreenState extends State<HomeScreen> {
       if (images.isEmpty) return;
 
       if (!mounted) return;
-      _showUploadDialog(context, message: 'Fotoğraflar gönderiliyor (0/${images.length})...');
+      _showUploadDialog(context,
+          message: 'Fotoğraflar gönderiliyor (0/${images.length})...');
 
       for (int i = 0; i < images.length; i++) {
         if (i > 0 && mounted) {
           Navigator.pop(context); // Pop previous progress dialog
-          _showUploadDialog(context, message: 'Fotoğraflar gönderiliyor ($i/${images.length})...');
+          _showUploadDialog(context,
+              message: 'Fotoğraflar gönderiliyor ($i/${images.length})...');
         }
 
         final image = images[i];
         final bytes = await image.readAsBytes();
         final extension = image.path.split('.').last.toLowerCase();
-        
+
         final timestamp = DateTime.now().millisecondsSinceEpoch + i;
         final fileName = 'upload_${timestamp}_$i.$extension';
-        
+
         await SupabaseService().uploadToPC(bytes, fileName);
       }
 
@@ -497,7 +513,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${images.length} fotoğraf başarıyla bilgisayara gönderildi!'),
+          content: Text(
+              '${images.length} fotoğraf başarıyla bilgisayara gönderildi!'),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
         ),
@@ -516,13 +533,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _showUploadDialog(BuildContext context, {String message = 'Fotoğraf bilgisayara gönderiliyor...'}) {
+  void _showUploadDialog(BuildContext context,
+      {String message = 'Fotoğraf bilgisayara gönderiliyor...'}) {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           content: Row(
             children: [
               const CircularProgressIndicator(),
@@ -619,7 +638,8 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Container(
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
             ),
             padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
             child: Column(
@@ -663,7 +683,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           final messenger = ScaffoldMessenger.of(context);
                           Navigator.pop(context);
                           try {
-                            final clipData = await Clipboard.getData(Clipboard.kTextPlain);
+                            final clipData =
+                                await Clipboard.getData(Clipboard.kTextPlain);
                             final text = clipData?.text;
                             if (text == null || text.trim().isEmpty) {
                               messenger.showSnackBar(
@@ -675,10 +696,12 @@ class _HomeScreenState extends State<HomeScreen> {
                               );
                               return;
                             }
-                            await SupabaseService().sendClipboardText(text.trim());
+                            await SupabaseService()
+                                .sendClipboardText(text.trim());
                             messenger.showSnackBar(
                               SnackBar(
-                                content: Text('Panodan gönderildi: ${text.trim().length > 50 ? '${text.trim().substring(0, 50)}...' : text.trim()}'),
+                                content: Text(
+                                    'Panodan gönderildi: ${text.trim().length > 50 ? '${text.trim().substring(0, 50)}...' : text.trim()}'),
                                 backgroundColor: Colors.green,
                                 behavior: SnackBarBehavior.floating,
                               ),
@@ -697,7 +720,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         label: const Text('Panodan Gönder'),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
                     ),
@@ -713,7 +737,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             await SupabaseService().sendClipboardText(text);
                             messenger.showSnackBar(
                               SnackBar(
-                                content: Text('Gönderildi: ${text.length > 50 ? '${text.substring(0, 50)}...' : text}'),
+                                content: Text(
+                                    'Gönderildi: ${text.length > 50 ? '${text.substring(0, 50)}...' : text}'),
                                 backgroundColor: Colors.green,
                                 behavior: SnackBarBehavior.floating,
                               ),
@@ -732,7 +757,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         label: const Text('Gönder'),
                         style: FilledButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
                     ),

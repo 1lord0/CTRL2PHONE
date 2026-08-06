@@ -1,4 +1,5 @@
 import { IpcMain } from 'electron';
+import type { DiagnosticsLogger } from './diagnosticsLogger';
 
 export interface PanelIpcDeps {
   isShutdownStarted(): boolean;
@@ -20,12 +21,16 @@ export interface PanelIpcDeps {
     save(): void;
   };
   quitApplication(): void;
+  diagnostics?: Pick<DiagnosticsLogger, 'action'>;
 }
 
 export function registerPanelIpc(ipc: IpcMain, deps: PanelIpcDeps): () => void {
   ipc.handle('panel-interact-start', (event: any) => {
     if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
     if (deps.isShutdownStarted()) return { ok: false };
+    deps.diagnostics?.action('panel.interaction_started', {
+      mode: deps.mainWindowController.getPanelMode(),
+    });
     deps.mainWindowController.syncCompactPillLayer();
     const mainWindow = deps.mainWindowController.getWindow();
     if (
@@ -41,6 +46,9 @@ export function registerPanelIpc(ipc: IpcMain, deps: PanelIpcDeps): () => void {
   ipc.handle('panel-toggle', (event: any) => {
     if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
     if (deps.isShutdownStarted()) return { ok: false };
+    deps.diagnostics?.action('panel.toggle_requested', {
+      fromMode: deps.mainWindowController.getPanelMode(),
+    });
     deps.mainWindowController.toggleSpotlight();
     return { ok: true, mode: deps.mainWindowController.getPanelMode() };
   });
@@ -74,6 +82,7 @@ export function registerPanelIpc(ipc: IpcMain, deps: PanelIpcDeps): () => void {
   ipc.handle('panel-dismiss', (event: any) => {
     if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
     if (deps.isShutdownStarted()) return { ok: false };
+    deps.diagnostics?.action('panel.dismiss_requested');
     deps.mainWindowController.dismissSpotlight(true);
     return { ok: true, mode: deps.mainWindowController.getPanelMode() };
   });
@@ -94,18 +103,27 @@ export function registerPanelIpc(ipc: IpcMain, deps: PanelIpcDeps): () => void {
   ipc.handle('panel-save-pinned', (event: any, pinned: boolean) => {
     if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
     if (deps.isShutdownStarted()) return { ok: false };
+    deps.diagnostics?.action('panel.pin_changed', { pinned: Boolean(pinned) });
     deps.settings.panelPinned = Boolean(pinned);
     deps.settingsStore.save();
+    const mainWindow = deps.mainWindowController.getWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setAlwaysOnTop(Boolean(pinned));
+    }
     if (pinned) {
       deps.mainWindowController.presentSpotlight();
-    } else {
-      deps.mainWindowController.dismissSpotlight();
     }
     return { ok: true };
   });
 
   ipc.handle('app-quit', (event: any) => {
     if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    const mainWindow = deps.mainWindowController.getWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Give immediate visual feedback while the lifecycle controller drains active work.
+      mainWindow.hide();
+    }
+    deps.diagnostics?.action('app.close_button_confirmed');
     deps.quitApplication();
     return { ok: true };
   });

@@ -40,6 +40,7 @@ const API_KEYS = {
     'uploadFileToPhone',
     'startDragDownloadedFile',
     'deleteDownloadedFile',
+    'logUserAction',
     'onPhoneDownloadsUpdated',
   ],
   overlay: [
@@ -89,6 +90,7 @@ const CHANNELS = {
     ['invoke', 'upload-file-to-phone'],
     ['send', 'start-drag-downloaded-file'],
     ['invoke', 'delete-downloaded-file'],
+    ['send', 'diagnostics-user-action'],
     ['on', 'phone-downloads-updated'],
   ],
   overlay: [
@@ -200,9 +202,7 @@ describe('per-window preload contracts', () => {
         }
       }
 
-      expect(calls).toEqual(
-        CHANNELS[entrypoint].map(([kind, channel]) => ({ kind, channel }))
-      );
+      expect(calls).toEqual(CHANNELS[entrypoint].map(([kind, channel]) => ({ kind, channel })));
     }
   );
 

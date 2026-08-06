@@ -1,4 +1,5 @@
 import { IpcMain } from 'electron';
+import type { DiagnosticsLogger } from './diagnosticsLogger';
 
 export interface SelectionIpcDeps {
   isOverlaySender(sender: any): boolean;
@@ -51,11 +52,13 @@ export interface SelectionIpcDeps {
   mainWindowController: {
     hidePillForScreenshot(): void;
   };
+  diagnostics?: Pick<DiagnosticsLogger, 'action' | 'error'>;
 }
 
 export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () => void {
   ipc.handle('copy-selection', async (event: any, sessionId: number) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.copy_requested', { sessionId });
     const overlayWindow = deps.overlayWindowController.getWindow();
     const ports = {
       isSenderAuthorized: () => {
@@ -93,6 +96,11 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
 
   ipc.handle('set-selection', (event: any, payload: any) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.area_confirmed', {
+      sessionId: payload?.sessionId,
+      width: payload?.width,
+      height: payload?.height,
+    });
     if (!deps.selectionSession.active || !deps.selectionSession.isCurrent(payload?.sessionId)) {
       return { ok: false };
     }
@@ -132,6 +140,7 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
 
   ipc.handle('cancel-selection', (event: any, sessionId: number) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.cancel_requested', { sessionId });
     if (!deps.selectionSession.active || !deps.selectionSession.isCurrent(sessionId))
       return { ok: false };
     deps.overlayWindowController.hide(sessionId);
@@ -142,6 +151,10 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
 
   ipc.handle('set-annotated', (event: any, payload: any) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.annotation_changed', {
+      sessionId: payload?.sessionId,
+      hasAnnotations: Boolean(payload?.hasAnnotations),
+    });
     if (!deps.selectionSession.active || !deps.selectionSession.isCurrent(payload?.sessionId))
       return { ok: false };
     deps.selectionDragAssetStore.invalidate();
@@ -154,6 +167,7 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
 
   ipc.handle('confirm-selection-gemini', async (event: any, sessionId: number) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.send_to_gemini_requested', { sessionId });
     if (
       deps.selectionSession.active &&
       deps.selectionSession.rect &&
@@ -167,6 +181,7 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
 
   ipc.handle('confirm-selection-phone', async (event: any, sessionId: number) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.send_to_phone_requested', { sessionId });
     if (
       deps.selectionSession.active &&
       deps.selectionSession.rect &&
@@ -180,6 +195,7 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
 
   ipc.handle('confirm-selection-ocr', async (event: any, sessionId: number) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.ocr_requested', { sessionId });
     if (
       deps.selectionSession.active &&
       deps.selectionSession.rect &&
@@ -193,6 +209,7 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
 
   ipc.handle('capture-now', async (event: any) => {
     if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.capture_requested');
     if (deps.isShutdownStarted()) return { ok: false };
     if (!deps.selectionSession.active) {
       void deps.startSelectionSession();

@@ -11,11 +11,11 @@ export interface AppLifecycleControllerPorts<AppType, ScreenType> {
     stop(): void;
   };
   cleanupStaleSelectionDragFiles(): void;
-  cleanupPhoneSyncDownloads?(): void;
-  setupPhoneSyncPolling(): void;
+  cleanupPhoneSyncDownloads?(): Promise<void> | void;
+  setupPhoneSyncPolling(): Promise<void> | void;
   setupClipboardPolling(): void;
-  stopPhoneSyncPolling(): void;
-  stopClipboardPolling(): void;
+  stopPhoneSyncPolling(): Promise<void> | void;
+  stopClipboardPolling(): Promise<void> | void;
   externalCaptureDisplayCache: {
     resolve(display: any): Promise<any>;
     invalidate(): void;
@@ -41,7 +41,7 @@ export interface AppLifecycleControllerPorts<AppType, ScreenType> {
 
 export interface AppLifecycleController {
   start(): void;
-  beginShutdown(): boolean;
+  beginShutdown(): Promise<boolean>;
   isShutdownStarted(): boolean;
 }
 
@@ -59,6 +59,7 @@ export function createAppLifecycleController<
   },
 >(ports: AppLifecycleControllerPorts<AppType, ScreenType>): AppLifecycleController {
   let shutdownStarted = false;
+  let shutdownPromise: Promise<boolean> | null = null;
   let transientTimer: any = null;
   let geminiPrewarmTimer: any = null;
 
@@ -81,7 +82,7 @@ export function createAppLifecycleController<
         }
       });
 
-      ports.app.whenReady().then(() => {
+      ports.app.whenReady().then(async () => {
         ports.settingsStore.load();
         ports.phoneSyncState.load();
 
@@ -104,8 +105,8 @@ export function createAppLifecycleController<
         }
 
         ports.cleanupStaleSelectionDragFiles();
-        ports.cleanupPhoneSyncDownloads?.();
-        ports.setupPhoneSyncPolling();
+        await ports.setupPhoneSyncPolling();
+        if (shutdownStarted) return;
         ports.setupClipboardPolling();
 
         geminiPrewarmTimer = ports.setTimeout(() => {
@@ -130,8 +131,6 @@ export function createAppLifecycleController<
         }
 
         ports.app.on('activate', () => {
-          // If all windows are closed, re-create main window (or no-op)
-          // Under our structure, main window is handled by mainWindowController.
           const mainWindow = ports.mainWindowController.getWindow();
           if (!mainWindow || mainWindow.isDestroyed()) {
             ports.mainWindowController.init();
@@ -139,10 +138,16 @@ export function createAppLifecycleController<
         });
       });
 
-      ports.app.on('before-quit', () => {
-        if (self.beginShutdown()) {
-          // Let the asynchronous teardown process complete
+      ports.app.on('before-quit', (event?: any) => {
+        if (shutdownStarted) {
+          return;
         }
+        if (event && typeof event.preventDefault === 'function') {
+          event.preventDefault();
+        }
+        void self.beginShutdown().then(() => {
+          ports.app.quit();
+        });
       });
 
       ports.app.on('will-quit', () => {
@@ -150,43 +155,48 @@ export function createAppLifecycleController<
       });
 
       ports.app.on('window-all-closed', () => {
-        // Darwin (macOS) usually stays active, but Windows/Linux quits on close.
-        // We run on Windows.
         ports.app.quit();
       });
     },
 
     beginShutdown() {
-      if (shutdownStarted) return false;
+      if (shutdownPromise) return shutdownPromise;
+      if (shutdownStarted) return Promise.resolve(false);
       shutdownStarted = true;
-      (ports.app as any).isQuitting = true;
 
-      ports.selectionSession.shutdown();
-      ports.invalidateSelectionDragAsset();
-      ports.cleanupPhoneSyncDownloads?.();
+      shutdownPromise = (async () => {
+        (ports.app as any).isQuitting = true;
 
-      if (transientTimer !== null) {
-        ports.clearTimeout(transientTimer);
-        transientTimer = null;
-      }
-      if (geminiPrewarmTimer !== null) {
-        ports.clearTimeout(geminiPrewarmTimer);
-        geminiPrewarmTimer = null;
-      }
+        ports.selectionSession.shutdown();
+        ports.invalidateSelectionDragAsset();
 
-      ports.notificationController.shutdown();
-      ports.overlayWindowController.invalidateLifecycle();
-      ports.nativePillHudController.stop();
-      ports.keyListenerController.stop();
-      ports.stopPhoneSyncPolling();
-      ports.stopClipboardPolling();
+        if (transientTimer !== null) {
+          ports.clearTimeout(transientTimer);
+          transientTimer = null;
+        }
+        if (geminiPrewarmTimer !== null) {
+          ports.clearTimeout(geminiPrewarmTimer);
+          geminiPrewarmTimer = null;
+        }
 
-      // Cleanup controllers
-      ports.mainWindowController.destroy();
-      ports.overlayWindowController.destroy();
-      ports.geminiWindowController.destroy();
+        ports.notificationController.shutdown();
+        ports.overlayWindowController.invalidateLifecycle();
+        ports.nativePillHudController.stop();
+        ports.keyListenerController.stop();
 
-      return true;
+        await ports.stopPhoneSyncPolling();
+        await ports.stopClipboardPolling();
+        await ports.cleanupPhoneSyncDownloads?.();
+
+        // Cleanup controllers
+        ports.mainWindowController.destroy();
+        ports.overlayWindowController.destroy();
+        ports.geminiWindowController.destroy();
+
+        return true;
+      })();
+
+      return shutdownPromise;
     },
 
     isShutdownStarted() {

@@ -13,6 +13,7 @@
 | A2 | **Supabase anon key** | Desktop `settings.json` (encrypted); the pairing **QR code**; the mobile app's storage |
 | A3 | **AI provider API key** (Gemini / Claude / OpenAI / custom) | Desktop `settings.json` (encrypted); sent to the chosen provider over TLS |
 | A4 | **Supabase project** (storage contents + quota) | Your Supabase account |
+| A5 | **Clipboard text / links** | OS clipboard and transient `clipboard_sync` rows |
 
 ## 2. Trust boundaries
 
@@ -28,7 +29,9 @@
   minimal `contextBridge` preload, and a restrictive CSP on the renderer. The renderer
   cannot reach Node or the filesystem directly.
 - **Desktop ↔ Supabase** — authenticated only by the **anon key**; access is constrained
-  by **Row Level Security** once the in-app *Secure Setup (RLS)* SQL has been run.
+  by **Row Level Security** once the in-app *Secure Setup (RLS)* SQL has been run. The key
+  is a bearer capability: paired clients can select/delete clipboard rows and access bucket
+  objects allowed by those policies.
 - **Desktop ↔ AI provider** — the cropped PNG + your prompt leave your machine for the
   provider you selected. The network request runs in the **main** process (no CORS/CSP).
 - **The bucket is the phone↔PC transport** — both devices authenticate with the *same*
@@ -54,15 +57,17 @@
 | **Information disclosure** | Screenshot + prompt sent to a cloud model | Inherent to using a hosted model — **you choose the provider**. Use the **custom/local** provider (Ollama, LM Studio) to keep everything on-device, or *Web* mode to keep it within your own Google session. |
 | **Spoofing / Tampering** | Forged reads/writes to the bucket | RLS policies scope `select/insert/update/delete` to your one bucket for `anon`; all transport is TLS. |
 | **Tampering** | Malicious payload posing as an incoming image | Phone→PC files are validated as real images before use; a download that isn't a valid image is **kept (not deleted)** for retry, never executed. |
+| **Information disclosure / tampering** | An anon-key holder reads, inserts, or deletes clipboard messages | The generated SQL constrains source values and clipboard length, grants no UPDATE, and limits rows to 10,000 Unicode characters. This reduces abuse but cannot distinguish two holders of the same bearer key. |
 | **Denial of service** | Filling the free-tier storage quota | **Purge Cloud** button; phone→PC items are deleted only **after** a successful local copy (ack-after-success). |
 | **Elevation of privilege** | Renderer → Node / RCE | `contextIsolation` + no `nodeIntegration` + CSP; the renderer talks to main only through the typed preload bridge. |
 | **Elevation / abuse** | Global keyboard hook capturing keystrokes | The C# `WH_KEYBOARD_LL` hook only **swallows** keys while the selection overlay is active (smart key-blocking); it runs at your own user privilege and ships as source you compile. |
 
 ## 5. Residual risks (accepted / out of scope)
 
-1. **The anon key is a shared bucket credential, by design.** Whoever has it can read and
-   write the whole bucket. This is not multi-tenant — rotate the key in Supabase if it
-   leaks, and re-pair the phone.
+1. **The anon key is a shared bearer capability, by design.** Whoever has it can perform
+   the bucket-object and `clipboard_sync` SELECT/INSERT/DELETE operations allowed by the
+   generated policies. This is not multi-tenant — rotate the key in Supabase if it leaks,
+   and re-pair the phone.
 2. **Mobile stores Supabase credentials in plaintext** (`SharedPreferences`) today. A
    rooted device or a backup extraction can read them. Migrating to
    `flutter_secure_storage` is planned (tracked separately).

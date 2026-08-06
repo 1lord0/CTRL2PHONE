@@ -1,4 +1,3 @@
-import { app } from 'electron';
 import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -21,42 +20,13 @@ export function stopOcrProcesses(): void {
   activeOcrProcesses.clear();
 }
 
-function loadEmbeddedOcrScript(): string {
-  const bundled = path.join(__dirname, '..', 'ocr.ps1');
-  if (fs.existsSync(bundled)) {
-    return fs.readFileSync(bundled, 'utf8');
-  }
-  return fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'ocr.ps1'), 'utf8');
-}
-
 export interface OcrOptions {
   /** When set, used as fallback if Windows OCR fails or returns empty text. */
   aiConfig?: AiConfig | null;
 }
 
-function helperCandidates(name: string): string[] {
-  const resourcesPath = process.resourcesPath;
-  const candidates = [
-    resourcesPath ? path.join(resourcesPath, 'src', name) : '',
-    resourcesPath ? path.join(resourcesPath, name) : '',
-    path.join(__dirname, '..', name),
-    path.join(__dirname, '..', '..', 'src', name),
-  ];
-  try {
-    if (app?.getAppPath) {
-      candidates.push(path.join(app.getAppPath(), 'src', name));
-    }
-  } catch {
-    // app may not be ready in unit tests
-  }
-  return [...new Set(candidates.filter(Boolean))];
-}
-
-function getOcrHelperPath(): string | null {
-  for (const p of helperCandidates('ocr_helper.exe')) {
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
+export function getPackagedOcrScriptPath(resourcesPath: string): string {
+  return path.join(resourcesPath, 'src', 'ocr.ps1');
 }
 
 let cachedScriptPath: string | null = null;
@@ -66,25 +36,34 @@ function resolveOcrScriptPath(): string {
     return cachedScriptPath;
   }
 
-  for (const p of helperCandidates('ocr.ps1')) {
+  const candidates = [
+    getPackagedOcrScriptPath(process.resourcesPath),
+    path.join(__dirname, '..', 'ocr.ps1'),
+    path.join(__dirname, '..', '..', 'src', 'ocr.ps1'),
+    path.join(__dirname, '..', '..', '..', 'src', 'ocr.ps1'),
+  ];
+  for (const p of [...new Set(candidates)]) {
     if (fs.existsSync(p)) {
       cachedScriptPath = p;
       return p;
     }
   }
 
-  const tempScript = path.join(os.tmpdir(), 'ctrl2phone-ocr.ps1');
-  fs.writeFileSync(tempScript, loadEmbeddedOcrScript(), 'utf8');
-  cachedScriptPath = tempScript;
-  return tempScript;
+  throw new Error(`Paketlenmiş OCR betiği bulunamadı: ${candidates[0]}`);
 }
 
-function runProcess(command: string, args: string[], label: string): Promise<void> {
+export function runOcrProcess(
+  command: string,
+  args: string[],
+  label: string,
+  timeoutMs = OCR_PROCESS_TIMEOUT_MS
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, { windowsHide: true });
     activeOcrProcesses.add(proc);
     let stderr = '';
     let settled = false;
+    let timeoutError: Error | null = null;
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
@@ -94,19 +73,25 @@ function runProcess(command: string, args: string[], label: string): Promise<voi
       else resolve();
     };
     const timeout = setTimeout(() => {
+      timeoutError = new Error(`${label} ${timeoutMs / 1000} saniye içinde tamamlanmadı`);
       try {
         proc.kill();
-      } catch {
-        // Ignore a concurrent natural exit.
+      } catch (error) {
+        finish(error instanceof Error ? error : timeoutError);
       }
-      finish(new Error(`${label} ${OCR_PROCESS_TIMEOUT_MS / 1000} saniye içinde tamamlanmadı`));
-    }, OCR_PROCESS_TIMEOUT_MS);
+      // Wait for `close` before rejecting. The caller owns temporary files and
+      // must not remove them while PowerShell may still be using them.
+    }, timeoutMs);
 
     proc.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
     proc.on('error', (error) => finish(error));
     proc.on('close', (code) => {
+      if (timeoutError) {
+        finish(timeoutError);
+        return;
+      }
       if (code !== 0) {
         finish(new Error(stderr.trim() || `${label} çıkış kodu ${code}`));
         return;
@@ -117,46 +102,35 @@ function runProcess(command: string, args: string[], label: string): Promise<voi
 }
 
 async function runWindowsOcr(pngBuffer: Buffer): Promise<string> {
-  const stamp = Date.now();
-  const tempPath = path.join(os.tmpdir(), `ctrl2phone-ocr-${stamp}.png`);
-  const outputPath = path.join(os.tmpdir(), `ctrl2phone-ocr-out-${stamp}.txt`);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctrl2phone-ocr-'));
+  const tempPath = path.join(tempDir, 'input.png');
+  const outputPath = path.join(tempDir, 'output.txt');
   fs.writeFileSync(tempPath, pngBuffer);
 
   try {
-    const helperPath = getOcrHelperPath();
-    if (helperPath) {
-      await runProcess(helperPath, [tempPath, outputPath], 'ocr_helper');
-    } else {
-      const scriptPath = resolveOcrScriptPath();
-      await runProcess(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-File',
-          scriptPath,
-          '-ImagePath',
-          tempPath,
-          '-OutputPath',
-          outputPath,
-        ],
-        'ocr.ps1'
-      );
-    }
+    const scriptPath = resolveOcrScriptPath();
+    await runOcrProcess(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        scriptPath,
+        '-ImagePath',
+        tempPath,
+        '-OutputPath',
+        outputPath,
+      ],
+      'ocr.ps1'
+    );
 
     if (!fs.existsSync(outputPath)) {
       return '';
     }
     return fs.readFileSync(outputPath, 'utf8').trim();
   } finally {
-    for (const p of [tempPath, outputPath]) {
-      try {
-        fs.unlinkSync(p);
-      } catch {
-        // ignore cleanup failure
-      }
-    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 

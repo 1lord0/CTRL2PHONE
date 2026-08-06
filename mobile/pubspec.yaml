@@ -31,8 +31,15 @@ dependencies:
   # HTTP client
   http: ^1.2.2
 
+  # Temporary file location for gallery downloads
+  path_provider: ^2.1.5
+
   # Local settings persistence
   shared_preferences: ^2.3.3
+  flutter_secure_storage: ^10.3.1
+
+  # Stable, non-secret account fingerprint
+  crypto: ^3.0.7
 
   # QR code scanning
   mobile_scanner: ^7.2.0

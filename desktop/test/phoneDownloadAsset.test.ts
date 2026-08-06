@@ -13,7 +13,17 @@ jest.mock('crypto', () => {
 });
 
 describe('phone download asset validation', () => {
-  const tempDir = 'C:\\Users\\eren\\AppData\\Local\\Temp\\ctrl2phone';
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctrl2phone-test-asset-'));
+  });
+
+  afterEach(async () => {
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 
   it('allows valid image names and produces unique paths inside the temp dir', () => {
     const validNames = ['image.png', 'photo.jpg', 'snapshot.JPEG', 'pic.webp', 'anim.gif', 'draw.bmp'];

@@ -1,6 +1,7 @@
 appId: com.ctrl2phone.desktop
 productName: Ctrl2Phone
 copyright: Copyright © 2026 Eren
+forceCodeSigning: true
 directories:
   output: dist
   buildResources: build
@@ -12,7 +13,7 @@ files:
   - pill.html
   - package.json
 asarUnpack:
-  - "**/node_modules/screenshot-desktop/**/*"
+  - '**/node_modules/screenshot-desktop/**/*'
 extraResources:
   - from: src/key_listener.exe
     to: src/key_listener.exe
@@ -35,4 +36,3 @@ nsis:
 publish:
   provider: github
   releaseType: release
-

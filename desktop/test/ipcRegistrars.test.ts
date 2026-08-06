@@ -5,6 +5,7 @@ import { registerPanelIpc } from '../src/main/registerPanelIpc';
 import { registerStorageIpc } from '../src/main/registerStorageIpc';
 import { registerFileIpc } from '../src/main/registerFileIpc';
 import { registerGeminiIpc } from '../src/main/registerGeminiIpc';
+import { registerDiagnosticsIpc } from '../src/main/registerDiagnosticsIpc';
 
 class MockIpcMain {
   handlers: Record<string, Function> = {};
@@ -30,7 +31,7 @@ class MockIpcMain {
 
   removeListener(channel: string, callback: Function) {
     if (this.listeners[channel]) {
-      this.listeners[channel] = this.listeners[channel].filter(cb => cb !== callback);
+      this.listeners[channel] = this.listeners[channel].filter((cb) => cb !== callback);
     }
   }
 }
@@ -45,10 +46,10 @@ describe('IpcRegistrars', () => {
   });
 
   afterEach(() => {
-    disposables.forEach(dispose => dispose());
+    disposables.forEach((dispose) => dispose());
   });
 
-  it('registers all 29 handlers/listeners exactly once and disposes cleanly', () => {
+  it('registers all handlers/listeners exactly once and disposes cleanly', () => {
     // Given mock adapters/dependencies
     const mockDeps: any = {
       settings: {},
@@ -116,7 +117,7 @@ describe('IpcRegistrars', () => {
       executeSelectionPhoneAction: jest.fn(),
       executeSelectionOcrAction: jest.fn(),
       executeSelectionElectronDrag: jest.fn().mockReturnValue({ ok: true }),
-      
+
       isShutdownStarted: () => false,
       getStoragePurgeInFlightGeneration: () => null,
       setStoragePurgeInFlightGeneration: jest.fn(),
@@ -136,6 +137,7 @@ describe('IpcRegistrars', () => {
       isMainSender: jest.fn().mockReturnValue(true),
       isOverlaySender: jest.fn().mockReturnValue(true),
       isMainWindowSender: jest.fn().mockReturnValue(true),
+      diagnostics: { action: jest.fn(), warn: jest.fn() },
     };
 
     // Register all IPC modules
@@ -145,28 +147,29 @@ describe('IpcRegistrars', () => {
     disposables.push(registerStorageIpc(mockIpc, mockDeps));
     disposables.push(registerFileIpc(mockIpc, mockDeps));
     disposables.push(registerGeminiIpc(mockIpc, mockDeps));
+    disposables.push(registerDiagnosticsIpc(mockIpc as any, mockDeps));
 
     // Verify all handle channels are registered
-    IPC_HANDLE_CHANNELS.forEach(channel => {
+    IPC_HANDLE_CHANNELS.forEach((channel) => {
       expect(mockIpc.handlers[channel]).toBeDefined();
     });
 
     // Verify all on channels are registered
-    IPC_ON_CHANNELS.forEach(channel => {
+    IPC_ON_CHANNELS.forEach((channel) => {
       expect(mockIpc.listeners[channel]).toBeDefined();
       expect(mockIpc.listeners[channel].length).toBe(1);
     });
 
     // Dispose all registrars
-    disposables.forEach(dispose => dispose());
+    disposables.forEach((dispose) => dispose());
     disposables = [];
 
     // Verify they are completely cleaned up
-    IPC_HANDLE_CHANNELS.forEach(channel => {
+    IPC_HANDLE_CHANNELS.forEach((channel) => {
       expect(mockIpc.handlers[channel]).toBeUndefined();
     });
 
-    IPC_ON_CHANNELS.forEach(channel => {
+    IPC_ON_CHANNELS.forEach((channel) => {
       expect(mockIpc.listeners[channel]).toEqual([]);
     });
   });
@@ -242,7 +245,7 @@ describe('IpcRegistrars', () => {
       executeSelectionPhoneAction: jest.fn(),
       executeSelectionOcrAction: jest.fn(),
       executeSelectionElectronDrag: jest.fn().mockReturnValue({ ok: true }),
-      
+
       isShutdownStarted: () => false,
       getStoragePurgeInFlightGeneration: () => null,
       setStoragePurgeInFlightGeneration: jest.fn(),
@@ -264,6 +267,7 @@ describe('IpcRegistrars', () => {
       isMainSender: (sender: any) => sender.id === 'main-window',
       isOverlaySender: (sender: any) => sender.id === 'overlay-window',
       isMainWindowSender: (sender: any) => sender.id === 'main-window',
+      diagnostics: { action: jest.fn(), warn: jest.fn() },
     };
 
     // Register all IPC modules
@@ -273,6 +277,7 @@ describe('IpcRegistrars', () => {
     disposables.push(registerStorageIpc(mockIpc, mockDeps));
     disposables.push(registerFileIpc(mockIpc, mockDeps));
     disposables.push(registerGeminiIpc(mockIpc, mockDeps));
+    disposables.push(registerDiagnosticsIpc(mockIpc as any, mockDeps));
 
     // Test main window channels reject non-main senders
     const mainWindowOnlyChannels = [
@@ -334,7 +339,7 @@ describe('IpcRegistrars', () => {
     }
 
     // Clean up
-    disposables.forEach(dispose => dispose());
+    disposables.forEach((dispose) => dispose());
     disposables = [];
   });
 });
