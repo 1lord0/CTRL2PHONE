@@ -2,6 +2,7 @@ import {
   buildAiRequest,
   parseAiResponse,
   defaultModelFor,
+  buildGeminiStructuredRequest,
   AiConfig,
 } from '../src/lib/aiProviders';
 
@@ -10,7 +11,7 @@ const PROMPT = 'Bu ekranı açıkla';
 
 describe('defaultModelFor', () => {
   it('returns sensible per-provider defaults', () => {
-    expect(defaultModelFor('gemini')).toBe('gemini-2.0-flash');
+    expect(defaultModelFor('gemini')).toBe('gemini-2.5-flash');
     expect(defaultModelFor('claude')).toBe('claude-opus-4-8');
     expect(defaultModelFor('openai')).toBe('gpt-4o');
     expect(defaultModelFor('custom')).toBe('');
@@ -20,10 +21,11 @@ describe('defaultModelFor', () => {
 describe('buildAiRequest — gemini', () => {
   const cfg: AiConfig = { provider: 'gemini', apiKey: 'KEY123' };
 
-  it('targets the generateContent endpoint with the key in the query string', () => {
+  it('targets the generateContent endpoint with the key only in a header', () => {
     const req = buildAiRequest(cfg, PNG, PROMPT);
-    expect(req.url).toContain('models/gemini-2.0-flash:generateContent');
-    expect(req.url).toContain('key=KEY123');
+    expect(req.url).toContain('models/gemini-2.5-flash:generateContent');
+    expect(req.url).not.toContain('KEY123');
+    expect(req.headers['x-goog-api-key']).toBe('KEY123');
   });
 
   it('puts the prompt text and inline png image in the parts array', () => {
@@ -37,6 +39,23 @@ describe('buildAiRequest — gemini', () => {
   it('honors an explicit model override', () => {
     const req = buildAiRequest({ ...cfg, model: 'gemini-1.5-pro' }, PNG, PROMPT);
     expect(req.url).toContain('models/gemini-1.5-pro:generateContent');
+  });
+});
+
+describe('buildGeminiStructuredRequest', () => {
+  it('requests schema-constrained JSON without deprecated sampling options', () => {
+    const schema = { type: 'object', properties: { route: { type: 'string' } } };
+    const request = buildGeminiStructuredRequest(
+      { apiKey: 'KEY123', model: 'gemini-2.5-flash' },
+      PNG,
+      PROMPT,
+      schema
+    );
+    const body = request.body as any;
+    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body.generationConfig.responseSchema).toEqual(schema);
+    expect(body.generationConfig.temperature).toBeUndefined();
+    expect(request.url).not.toContain('KEY123');
   });
 });
 
@@ -96,7 +115,9 @@ describe('buildAiRequest — openai & custom', () => {
 
 describe('parseAiResponse', () => {
   it('reads gemini candidates → content → parts text', () => {
-    const json = { candidates: [{ content: { parts: [{ text: 'Merhaba ' }, { text: 'dünya' }] } }] };
+    const json = {
+      candidates: [{ content: { parts: [{ text: 'Merhaba ' }, { text: 'dünya' }] } }],
+    };
     expect(parseAiResponse('gemini', json)).toBe('Merhaba dünya');
   });
 

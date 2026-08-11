@@ -24,7 +24,7 @@ const MAX_OUTPUT_TOKENS = 4096;
 export function defaultModelFor(provider: AiProvider): string {
   switch (provider) {
     case 'gemini':
-      return 'gemini-2.0-flash';
+      return 'gemini-2.5-flash';
     case 'claude':
       return 'claude-opus-4-8';
     case 'openai':
@@ -42,8 +42,8 @@ export function buildAiRequest(cfg: AiConfig, pngBase64: string, prompt: string)
     return {
       url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
         model
-      )}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`,
-      headers: { 'Content-Type': 'application/json' },
+      )}:generateContent`,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
       body: {
         contents: [
           {
@@ -109,6 +109,97 @@ export function buildAiRequest(cfg: AiConfig, pngBase64: string, prompt: string)
       ],
     },
   };
+}
+
+export function sanitizeGeminiSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    return schema.map(sanitizeGeminiSchema);
+  }
+  if (schema && typeof schema === 'object') {
+    const obj = schema as Record<string, unknown>;
+    const clean: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (
+        key === 'additionalProperties' ||
+        key === 'minimum' ||
+        key === 'maximum' ||
+        key === 'minItems' ||
+        key === 'maxItems' ||
+        key === '$schema'
+      ) {
+        continue;
+      }
+      clean[key] = sanitizeGeminiSchema(value);
+    }
+    return clean;
+  }
+  return schema;
+}
+
+export function buildGeminiStructuredRequest(
+  cfg: Pick<AiConfig, 'apiKey' | 'model'>,
+  pngBase64: string,
+  prompt: string,
+  responseSchema: Readonly<Record<string, unknown>>
+): AiRequest {
+  const model = cfg.model?.trim() || defaultModelFor('gemini');
+  return {
+    url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent`,
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
+    body: {
+      contents: [
+        {
+          parts: [{ text: prompt }, { inline_data: { mime_type: 'image/png', data: pngBase64 } }],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: 2048,
+        responseMimeType: 'application/json',
+        responseSchema: sanitizeGeminiSchema(responseSchema),
+      },
+    },
+  };
+}
+
+export async function analyzeGeminiStructured(
+  cfg: Pick<AiConfig, 'apiKey' | 'model'>,
+  pngBase64: string,
+  prompt: string,
+  responseSchema: Readonly<Record<string, unknown>>
+): Promise<unknown> {
+  if (!cfg.apiKey.trim()) throw new Error('gemini_api_key_missing');
+  const request = buildGeminiStructuredRequest(cfg, pngBase64, prompt, responseSchema);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(request.url, {
+      method: 'POST',
+      headers: request.headers,
+      body: JSON.stringify(request.body),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      let detail = '';
+      try {
+        detail = (await response.text()).slice(0, 400);
+      } catch {
+        // Best-effort provider detail only; the API key is never part of the URL.
+      }
+      throw new Error(`gemini ${response.status}: ${detail}`);
+    }
+    const json = await response.json();
+    const text = parseAiResponse('gemini', json);
+    if (!text) throw new Error('gemini_structured_response_empty');
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error('gemini_structured_response_invalid_json');
+    }
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /** Extract the assistant text from a provider's JSON response. Pure. */

@@ -1,0 +1,202 @@
+{
+  "id": "ctrl2phone-recipe-specialist-v1",
+  "name": "Ctrl2Phone - Recipe Specialist",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "ctrl2phone-recipe-specialist-v1-trigger",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://oinpivzhnfcrgcrrqgii.supabase.co/rest/v1/rpc/advance_action_task",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ p_task_id: $('When Executed by Another Workflow').item.json.body.taskId, p_expected_version: 0, p_next_status: 'analyzing', p_progress: 10, p_intent_type: 'recipe_extraction', p_title: String($('When Executed by Another Workflow').item.json.body.intentAnalysis.title).trim().slice(0, 160) }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ctrl2phone-recipe-specialist-v1-analyzing",
+      "name": "Mark Analyzing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        0
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_N8N_SUPABASE_CREDENTIAL_ID",
+          "name": "Ctrl2Phone Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://oinpivzhnfcrgcrrqgii.supabase.co/storage/v1/object/authenticated/' + encodeURIComponent($('When Executed by Another Workflow').item.json.body.source.bucket) + '/' + $('When Executed by Another Workflow').item.json.body.source.objectPath.split('/').map(encodeURIComponent).join('/') }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "sourceImage"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "ctrl2phone-recipe-specialist-v1-download",
+      "name": "Download Private Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -280,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_N8N_SUPABASE_CREDENTIAL_ID",
+          "name": "Ctrl2Phone Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const imageData = String($('Download Private Image').item.binary?.sourceImage?.data ?? $binary.sourceImage.data); return { contents: [ { parts: [ { text: \"Extract a practical recipe from this screenshot. Read visible ingredients and cooking clues carefully; clearly mark uncertainty instead of inventing missing details. Return concise Turkish text, ordered steps, and normalized ingredient amounts when visible.\" }, { inlineData: { mimeType: 'image/png', data: imageData } } ] } ], generationConfig: { maxOutputTokens: 4096, responseMimeType: 'application/json', responseSchema: {\"type\":\"object\",\"required\":[\"title\",\"summary\",\"dishName\",\"servings\",\"prepTime\",\"cookTime\",\"ingredients\",\"steps\",\"tips\",\"sources\"],\"properties\":{\"title\":{\"type\":\"string\",\"maxLength\":160},\"summary\":{\"type\":\"string\",\"maxLength\":4000},\"dishName\":{\"type\":\"string\",\"maxLength\":200},\"servings\":{\"type\":\"string\",\"maxLength\":80},\"prepTime\":{\"type\":\"string\",\"maxLength\":80},\"cookTime\":{\"type\":\"string\",\"maxLength\":80},\"ingredients\":{\"type\":\"array\",\"maxItems\":50,\"items\":{\"type\":\"object\",\"required\":[\"item\",\"amount\"],\"properties\":{\"item\":{\"type\":\"string\",\"maxLength\":300},\"amount\":{\"type\":\"string\",\"maxLength\":120} } } },\"steps\":{\"type\":\"array\",\"maxItems\":30,\"items\":{\"type\":\"string\",\"maxLength\":1200} },\"tips\":{\"type\":\"array\",\"maxItems\":15,\"items\":{\"type\":\"string\",\"maxLength\":1000} },\"sources\":{\"type\":\"array\",\"maxItems\":10,\"items\":{\"type\":\"object\",\"required\":[\"title\",\"url\"],\"properties\":{\"title\":{\"type\":\"string\",\"maxLength\":300},\"url\":{\"type\":\"string\",\"maxLength\":2048} } } } } } } }; })() }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ctrl2phone-recipe-specialist-v1-gemini",
+      "name": "Gemini recipe_extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -40,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_N8N_GEMINI_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Ctrl2Phone Gemini API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://oinpivzhnfcrgcrrqgii.supabase.co/rest/v1/rpc/advance_action_task",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const text = ($json.candidates?.[0]?.content?.parts ?? []).map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim(); const result = JSON.parse(text); const fallbackTitle = String($('When Executed by Another Workflow').item.json.body.intentAnalysis.title ?? 'Action sonucu').trim().slice(0, 160) || 'Action sonucu'; const title = String(result.title ?? fallbackTitle).trim().slice(0, 160) || fallbackTitle; const summary = String(result.summary ?? '').slice(0, 20000); const sources = Array.isArray(result.sources) ? result.sources.slice(0, 20) : []; const confidenceValue = Number($('When Executed by Another Workflow').item.json.body.intentAnalysis.confidence); const confidence = Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0; return { p_task_id: $('When Executed by Another Workflow').item.json.body.taskId, p_expected_version: 1, p_next_status: 'completed', p_progress: 100, p_intent_type: 'recipe_extraction', p_title: title, p_summary: summary, p_result_json: result, p_sources: sources, p_confidence: confidence }; })() }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ctrl2phone-recipe-specialist-v1-completed",
+      "name": "Mark Completed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        0
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_N8N_SUPABASE_CREDENTIAL_ID",
+          "name": "Ctrl2Phone Supabase Service Role"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Mark Analyzing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Analyzing": {
+      "main": [
+        [
+          {
+            "node": "Download Private Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Private Image": {
+      "main": [
+        [
+          {
+            "node": "Gemini recipe_extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini recipe_extraction": {
+      "main": [
+        [
+          {
+            "node": "Mark Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "e564e20a-a011-489e-aa9d-1f8d2886293c",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

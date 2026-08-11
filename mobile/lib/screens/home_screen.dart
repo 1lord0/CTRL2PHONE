@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../services/connection_settings_store.dart';
 import '../services/supabase_service.dart';
 import '../providers/photos_provider.dart';
+import '../providers/action_tasks_provider.dart';
 import '../widgets/photo_card.dart';
 import 'detail_screen.dart';
 import 'settings_screen.dart';
@@ -164,6 +165,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => DetailScreen(
           photos: List<Photo>.from(provider.photos),
           initialIndex: index,
+          accountFingerprint: provider.accountFingerprint,
         ),
       ),
     );
@@ -192,6 +194,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (confirm == true && mounted) {
       final provider = context.read<PhotosProvider>();
+      await context
+          .read<ActionTasksProvider>()
+          .disconnect(clearPersistent: true);
       await provider.prepareForAccount(null);
       await SupabaseService.clearClient();
       await ConnectionSettingsStore().clear();
@@ -429,6 +434,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           return PhotoCard(
             imageUrl: photo.url,
+            cacheKey: provider.cacheKeyFor(photo),
             onTap: () => _onPhotoTap(provider, index),
           );
         },

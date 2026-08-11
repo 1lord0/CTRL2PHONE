@@ -16,6 +16,7 @@ export interface AppLifecycleControllerPorts<AppType, ScreenType> {
   setupClipboardPolling(): void;
   stopPhoneSyncPolling(): Promise<void> | void;
   stopClipboardPolling(): Promise<void> | void;
+  stopActionTaskMonitoring(): Promise<void> | void;
   externalCaptureDisplayCache: {
     resolve(display: any): Promise<any>;
     invalidate(): void;
@@ -186,6 +187,7 @@ export function createAppLifecycleController<
 
         await ports.stopPhoneSyncPolling();
         await ports.stopClipboardPolling();
+        await ports.stopActionTaskMonitoring();
         await ports.cleanupPhoneSyncDownloads?.();
 
         // Cleanup controllers

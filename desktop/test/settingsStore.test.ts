@@ -21,8 +21,8 @@ function createPorts(initialFile: string | null = null): {
       },
       encryption: {
         isAvailable: () => true,
-        encrypt: value => `encrypted:${value}`,
-        decrypt: value => value.replace(/^encrypted:/, ''),
+        encrypt: (value) => `encrypted:${value}`,
+        decrypt: (value) => value.replace(/^encrypted:/, ''),
       },
       logger: {
         info: () => undefined,
@@ -41,6 +41,7 @@ describe('settings store', () => {
       prompt: 'custom prompt',
       supabaseKey: 'encrypted:supabase-secret',
       aiApiKey: 'encrypted:ai-secret',
+      actionWebhookSecret: 'encrypted:webhook-secret',
       pillVisibility: 'capture-only',
       unknownField: 'ignored',
     });
@@ -57,6 +58,7 @@ describe('settings store', () => {
     expect(settings.prompt).toBe('custom prompt');
     expect(settings.supabaseKey).toBe('supabase-secret');
     expect(settings.aiApiKey).toBe('ai-secret');
+    expect(settings.actionWebhookSecret).toBe('webhook-secret');
     expect(settings.pillVisibility).toBe('capture-only');
     expect(Object.hasOwn(settings, 'unknownField')).toBe(false);
   });
@@ -88,6 +90,7 @@ describe('settings store', () => {
     const settings = createDefaultSettings();
     settings.supabaseKey = 'supabase-secret';
     settings.aiApiKey = 'ai-secret';
+    settings.actionWebhookSecret = 'webhook-secret';
     const fixture = createPorts();
     const store = createSettingsStore(settings, fixture.ports);
 
@@ -100,9 +103,11 @@ describe('settings store', () => {
     expect(JSON.parse(written ?? '{}')).toMatchObject({
       supabaseKey: 'encrypted:supabase-secret',
       aiApiKey: 'encrypted:ai-secret',
+      actionWebhookSecret: 'encrypted:webhook-secret',
     });
     expect(settings.supabaseKey).toBe('supabase-secret');
     expect(settings.aiApiKey).toBe('ai-secret');
+    expect(settings.actionWebhookSecret).toBe('webhook-secret');
   });
 
   it('defaults autoCopyFromPhone to true in default settings', () => {
@@ -116,11 +121,11 @@ describe('settings store', () => {
     });
     const settings = createDefaultSettings();
     expect(settings.autoCopyFromPhone).toBe(true); // default is true
-    
+
     const { ports } = createPorts(persisted);
     const store = createSettingsStore(settings, ports);
     store.load();
-    
+
     expect(settings.autoCopyFromPhone).toBe(false); // loads false from file
   });
 
@@ -135,7 +140,7 @@ describe('settings store', () => {
       const store = createSettingsStore(settings, fixture.ports);
       store.load();
       expect(settings.pillVisibility).toBe(mode);
-      
+
       store.save();
       const written = JSON.parse(fixture.written() ?? '{}');
       expect(written.pillVisibility).toBe(mode);

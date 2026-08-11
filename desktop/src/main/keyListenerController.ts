@@ -48,7 +48,12 @@ export function createKeyListenerController<
 
         ports.attachStdinErrorGuard(proc, 'key_listener');
         ports.bindLineReader(proc.stdout, (line) => {
-          if (keyListenerProcess === proc) ports.onKeyEvent(line);
+          if (keyListenerProcess !== proc) return;
+          if (line.startsWith('DEBUG_KEY:') || line.startsWith('HOOK_ALIVE:')) {
+            console.log(`[KEY_DEBUG] ${line}`);
+            return;
+          }
+          ports.onKeyEvent(line);
         });
 
         proc.stderr?.on('data', (data: Buffer) => {

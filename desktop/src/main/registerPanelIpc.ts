@@ -20,6 +20,9 @@ export interface PanelIpcDeps {
   settingsStore: {
     save(): void;
   };
+  supabaseRuntime: {
+    getContext(): any;
+  };
   quitApplication(): void;
   diagnostics?: Pick<DiagnosticsLogger, 'action'>;
 }
@@ -128,6 +131,24 @@ export function registerPanelIpc(ipc: IpcMain, deps: PanelIpcDeps): () => void {
     return { ok: true };
   });
 
+  ipc.handle('panel-send-action-to-phone', async (event: any, taskId: string) => {
+    if (!deps.isMainSender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    if (deps.isShutdownStarted()) return { ok: false };
+    try {
+      const context = deps.supabaseRuntime.getContext();
+      if (!context) return { ok: false, error: 'Offline' };
+      const { error } = await context.client
+        .from('action_tasks')
+        .update({ sent_to_phone: true })
+        .eq('id', taskId);
+      if (error) throw error;
+      return { ok: true };
+    } catch (err: any) {
+      console.error('Failed to send task to phone:', err);
+      return { ok: false, error: err.message };
+    }
+  });
+
   return () => {
     ipc.removeHandler('panel-interact-start');
     ipc.removeHandler('panel-toggle');
@@ -136,5 +157,6 @@ export function registerPanelIpc(ipc: IpcMain, deps: PanelIpcDeps): () => void {
     ipc.removeHandler('panel-resize-compact');
     ipc.removeHandler('panel-save-pinned');
     ipc.removeHandler('app-quit');
+    ipc.removeHandler('panel-send-action-to-phone');
   };
 }

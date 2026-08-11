@@ -20,6 +20,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createExternalCaptureDisplayCache } from './lib/screenCaptureSource';
 import { getVirtualBounds as computeVirtualBounds } from './lib/geometry';
 import { analyzeImage, AiProvider } from './lib/aiProviders';
+import { analyzeActionIntent } from './lib/actionIntentAnalyzer';
 import { extractTextFromImage } from './lib/ocr';
 import {
   guardLocalClipboard,
@@ -71,6 +72,10 @@ import { resolveSelectionImage } from './main/selectionImageResolver';
 import { executeSelectionAiAction } from './main/selectionAiAction';
 import { executeSelectionPhoneAction } from './main/selectionPhoneAction';
 import { executeSelectionOcrAction } from './main/selectionOcrAction';
+import { executeSelectionWorkflowAction } from './main/selectionWorkflowAction';
+import { createActionWorkflowRuntime } from './main/actionWorkflowRuntime';
+import { createElectronActionWorkflowStateStore } from './main/actionWorkflowStateStore';
+import { createElectronActionTaskMonitor } from './main/electronActionTaskMonitor';
 
 // Registrars
 import { registerSettingsIpc } from './main/registerSettingsIpc';
@@ -106,6 +111,7 @@ const diagnostics = createDiagnosticsLogger({
 
 const settings = createDefaultSettings();
 const settingsStore = createElectronSettingsStore(settings);
+const actionWorkflowStateStore = createElectronActionWorkflowStateStore();
 const phoneDownloadAssetStorePromise = createPhoneDownloadAssetStore(app.getPath('temp'));
 
 const supabaseRuntime = createSupabaseRuntime(settings, {
@@ -117,6 +123,201 @@ const supabaseRuntime = createSupabaseRuntime(settings, {
   onInvalidate: () => {
     phoneFileSyncController.stop();
     clipboardSyncController.stopPolling();
+  },
+});
+
+let actionSupabaseClient: ReturnType<typeof createSupabaseClient> | null = null;
+let actionSupabaseUrl = '';
+let actionSupabaseKey = '';
+
+function getActionSupabaseConnection(): {
+  context: { client: ReturnType<typeof createSupabaseClient>; url: string };
+  url: string;
+} | null {
+  if (!settings.supabaseUrl || !settings.supabaseKey) return null;
+  if (
+    !actionSupabaseClient ||
+    actionSupabaseUrl !== settings.supabaseUrl ||
+    actionSupabaseKey !== settings.supabaseKey
+  ) {
+    actionSupabaseClient = createSupabaseClient(settings.supabaseUrl, settings.supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    actionSupabaseUrl = settings.supabaseUrl;
+    actionSupabaseKey = settings.supabaseKey;
+  }
+  return {
+    context: { client: actionSupabaseClient, url: actionSupabaseUrl },
+    url: actionSupabaseUrl,
+  };
+}
+
+const actionWorkflowRuntime = createActionWorkflowRuntime<any>({
+  getConnection: getActionSupabaseConnection,
+  isConnectionCurrent: (context) =>
+    !appLifecycle.isShutdownStarted() &&
+    context.client === actionSupabaseClient &&
+    context.url === settings.supabaseUrl &&
+    actionSupabaseKey === settings.supabaseKey,
+  getWebhookConfig: () => ({
+    url: settings.actionWebhookUrl,
+    secret: settings.actionWebhookSecret,
+  }),
+  stateStore: actionWorkflowStateStore,
+  restoreSession: async (context, auth) => {
+    const { data, error } = await context.client.auth.setSession({
+      access_token: auth.accessToken,
+      refresh_token: auth.refreshToken,
+    });
+    if (error || !data.session) return null;
+    return {
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+    };
+  },
+  signInAnonymously: async (context) => {
+    const { data, error } = await context.client.auth.signInAnonymously();
+    if (error || !data.session) {
+      throw new Error(`action_anonymous_auth_failed: ${error?.message || 'session_missing'}`);
+    }
+    return {
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+    };
+  },
+  createChannel: async (context, input) => {
+    const { data, error } = await context.client.rpc('create_action_channel', {
+      p_name: input.name,
+      p_invite_token: input.inviteToken,
+      p_invite_expires_at: input.inviteExpiresAt,
+    });
+    if (error || typeof data !== 'string') {
+      throw new Error(`action_channel_create_failed: ${error?.message || 'channel_id_missing'}`);
+    }
+    return data;
+  },
+  rotateChannelInvite: async (context, input) => {
+    const { data, error } = await context.client.rpc('rotate_action_channel_invite', {
+      p_channel_id: input.channelId,
+      p_invite_token: input.inviteToken,
+      p_invite_expires_at: input.inviteExpiresAt,
+    });
+    if (error || data !== input.channelId) {
+      throw new Error(
+        `action_channel_invite_rotate_failed: ${error?.message || 'channel_mismatch'}`
+      );
+    }
+  },
+  uploadActionInput: async (context, bucket, objectPath, pngBuffer) => {
+    const { error } = await context.client.storage.from(bucket).upload(objectPath, pngBuffer, {
+      contentType: 'image/png',
+      upsert: true,
+    });
+    if (error) throw new Error(`action_input_upload_failed: ${error.message}`);
+  },
+  enqueueTask: async (context, input) => {
+    const { data, error } = await context.client.rpc('enqueue_action_task', {
+      p_channel_id: input.channelId,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: input.requestHash,
+      p_source_device_id: input.sourceDeviceId,
+      p_source_storage_path: input.sourceStoragePath,
+      p_title: input.title,
+    });
+    if (error) {
+      throw new Error(`action_task_enqueue_failed: ${error.message}`);
+    }
+    const taskId =
+      typeof data === 'string'
+        ? data.trim()
+        : typeof (data as any)?.id === 'string'
+          ? (data as any).id
+          : '';
+    if (!taskId) {
+      throw new Error(
+        `action_task_enqueue_failed: task_id_missing (raw_data: ${JSON.stringify(data)})`
+      );
+    }
+    return taskId;
+  },
+  dispatchWebhook: async ({ url, secret, idempotencyKey, payload }) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    if (timeout.unref) timeout.unref();
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-ctrl2phone-secret': secret,
+          'x-idempotency-key': idempotencyKey,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`action_webhook_http_${response.status}`);
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  },
+});
+
+const actionTaskMonitor = createElectronActionTaskMonitor({
+  getContext: () => getActionSupabaseConnection()?.context ?? null,
+  isContextCurrent: (context) =>
+    !appLifecycle.isShutdownStarted() &&
+    context.client === actionSupabaseClient &&
+    context.url === settings.supabaseUrl &&
+    actionSupabaseKey === settings.supabaseKey,
+  publish: (task) => {
+    const mainWindow = mainWindowController.getWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('action-task-updated', task);
+    }
+    diagnostics.info('action_workflow', 'task_update_received', {
+      taskId: task.id,
+      status: task.workflowStatus,
+      progress: task.progress,
+      version: task.version,
+    });
+
+    if (task.workflowStatus === 'completed') {
+      const summary = task.summary || task.title;
+      setStatus('Action sonucu hazÄ±r');
+      setResponse(summary);
+      showCustomNotification('Action tamamlandÄ±', task.title, 'info');
+      mainWindowController.activateTransientPill();
+    } else if (task.workflowStatus === 'failed') {
+      diagnostics.error(
+        'action_workflow',
+        'task_failed',
+        new Error(task.errorMessage ?? task.errorCode ?? 'action_task_failed'),
+        {
+          taskId: task.id,
+          errorCode: task.errorCode,
+          progress: task.progress,
+          version: task.version,
+        }
+      );
+      const message = task.errorMessage || task.errorCode || 'Bilinmeyen iÅŸ akÄ±ÅŸÄ± hatasÄ±';
+      setStatus('Action iÅŸ akÄ±ÅŸÄ± baÅŸarÄ±sÄ±z');
+      setResponse(`Action hatasÄ±: ${message}`);
+      showCustomNotification('Action baÅŸarÄ±sÄ±z', message, 'error');
+      mainWindowController.activateTransientPill();
+    } else if (task.workflowStatus === 'cancelled') {
+      setStatus('Action gÃ¶revi iptal edildi');
+      mainWindowController.activateTransientPill();
+    } else {
+      setStatus(`Action iÅŸleniyor: %${task.progress}`);
+    }
+  },
+  warn: (message, detail) => {
+    diagnostics.warn('action_workflow', 'task_monitor_warning', { message, detail });
+  },
+  error: (message, error) => {
+    diagnostics.error('action_workflow', 'task_monitor_error', error, { message });
   },
 });
 
@@ -705,6 +906,53 @@ async function captureAndSend(sessionId: number): Promise<void> {
   return executeSelectionAiAction(sessionId, ports);
 }
 
+async function captureAndRunAction(sessionId: number): Promise<boolean> {
+  const snapshot = selectionSession.snapshot(sessionId);
+  if (!snapshot) return false;
+
+  return executeSelectionWorkflowAction(sessionId, {
+    isSelectionSessionCurrent: (id) => selectionSession.isCurrent(id),
+    isActionCurrent: (id) => selectionSession.isActionCurrent(id),
+    beginSelectionAction: (id) => selectionSession.beginAction(id),
+    endSelectionAction: (id) => selectionSession.endAction(id),
+    resolveSelectionImage: async () => resolveSelectionImage(snapshot, imageResolverPorts),
+    getImagePngBuffer: (image) => image.toPNG(),
+    analyzeIntent: (pngBuffer) =>
+      analyzeActionIntent(pngBuffer, {
+        apiKey: settings.aiApiKey,
+        model: settings.aiProvider === 'gemini' ? settings.aiModel : undefined,
+      }),
+    submitAction: async (input) => {
+      const result = await actionWorkflowRuntime.submit(input);
+      void actionTaskMonitor.watch(result.taskId).catch((error) => {
+        diagnostics.error('action_workflow', 'task_monitor_start_failed', error, {
+          taskId: result.taskId,
+        });
+      });
+      return result;
+    },
+    hideSelectionOverlay: (id) => overlayWindowController.hide(id),
+    resetSelectionSession: (id) => selectionSession.reset(id),
+    setStatus: (message) => setStatus(message),
+    setResponse: (message) => setResponse(message),
+    activateTransientPill: () => mainWindowController.activateTransientPill(),
+    reportError: (stage, error, details) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[ACTION_DEBUG] Stage: ${stage}, Error: ${errorMessage}`, details ?? {});
+      diagnostics.error('action_workflow', stage, error, {
+        sessionId,
+        ...(details ?? {}),
+      });
+    },
+    reportEvent: (stage, details) => {
+      diagnostics.info('action_workflow', stage, {
+        sessionId,
+        ...(details ?? {}),
+      });
+    },
+  });
+}
+
 async function captureAndSendToSupabase(sessionId: number): Promise<boolean> {
   const snapshot = selectionSession.snapshot(sessionId);
   if (!snapshot) return false;
@@ -932,7 +1180,7 @@ async function startSelectionSession(): Promise<void> {
 
     mainWindowController.showPillHudOverOverlay();
     overlayWindowController.sendInstruction(
-      'Alanı seç → X/Enter: Gemini · M: Telefon · C: OCR · Esc: iptal',
+      'Alanı seç → A: Action · X/Enter: Gemini · M: Telefon · C: OCR · Esc: iptal',
       sessionId
     );
     setStatus('Seçim modu açık. Alanı fareyle çiz.');
@@ -963,6 +1211,9 @@ const keyRouterPorts = {
   startSelectionSession,
   captureAndSend: () => {
     void captureAndSend(selectionSession.sessionId);
+  },
+  captureAndRunAction: () => {
+    void captureAndRunAction(selectionSession.sessionId);
   },
   captureAndSendToSupabase: () => {
     void captureAndSendToSupabase(selectionSession.sessionId);
@@ -1000,6 +1251,7 @@ const lifecycleComposition = createElectronLifecycleComposition({
   phoneDownloadAdapter: electronPhoneSyncAdapter,
   phoneFileSyncController,
   clipboardSyncController,
+  stopActionTaskMonitoring: () => actionTaskMonitor.stopAndDrain(),
   externalCaptureDisplayCache,
   geminiWindowController,
   autoUpdater,
@@ -1081,6 +1333,7 @@ const ipcDeps = {
   getDisplayNearestPoint: (pt: any) => screen.getDisplayNearestPoint(pt),
   getCursorScreenPoint: () => screen.getCursorScreenPoint(),
   captureAndSend,
+  captureAndRunAction,
   captureAndSendToSupabase,
   captureAndOcr,
   startSelectionSession,
@@ -1122,6 +1375,8 @@ const ipcDeps = {
   sendKeyListenerConfig,
   setupPhoneSyncPolling: lifecycleComposition.setupPhoneSyncPolling,
   setupClipboardPolling: lifecycleComposition.setupClipboardPolling,
+  stopActionTaskMonitor: () => actionTaskMonitor.stopAndDrain(),
+  createActionPairingInvite: () => actionWorkflowRuntime.createPairingInvite(),
   diagnostics,
 };
 

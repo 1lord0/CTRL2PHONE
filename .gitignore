@@ -54,6 +54,12 @@ mobile/.packages
 mobile/*.iml
 mobile/.idea/
 
+# --- Local n8n automation runtime ---
+automation/n8n/node_modules/
+automation/n8n/.env
+automation/n8n/.n8n/
+automation/n8n/tmp/
+
 # --- General ---
 # OS files
 .DS_Store

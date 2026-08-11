@@ -1,17 +1,46 @@
-# phone_app
+# Ctrl2Phone Mobile
 
-A new Flutter project.
+Flutter companion for the Ctrl2Phone desktop application. It keeps the photo
+gallery and AI Action task inbox as separate data layers.
 
-## Getting Started
+## Run and verify
 
-This project is a starting point for a Flutter application.
+```powershell
+flutter pub get
+flutter analyze
+flutter test
+flutter run
+```
 
-A few resources to get you started if this is your first Flutter project:
+To produce the tested Android debug package:
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```powershell
+flutter build apk --debug
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The APK is written to `build/app/outputs/flutter-apk/app-debug.apk`.
+
+## Pairing
+
+1. Apply the desktop-generated Supabase security SQL once.
+2. Enable Anonymous Sign-Ins in Supabase Auth.
+3. Open the desktop settings and generate a fresh QR code.
+4. Scan it from mobile settings and save.
+
+Legacy QRs still configure photo sync. A schema-v2 QR additionally contains a
+10-minute, one-time Action channel invite. The mobile app exchanges that invite
+immediately; it never writes the invite token to disk. Anonymous auth session
+tokens and the claimed channel ID are stored with `flutter_secure_storage`.
+
+## Task inbox behavior
+
+- The bottom navigation has separate **Fotoğraflar** and **Görevler** screens.
+- Task workflow versions only move forward; a late Realtime event cannot replace
+  a newer result.
+- Realtime is backed by serialized polling, so transient subscription failures
+  recover without concurrent writes.
+- The newest 100 tasks are cached per Supabase connection and channel, capped at
+  2 MiB. Cached tasks remain readable offline.
+- Read, pinned, and archived state is stored per mobile user through the
+  `set_action_task_user_state` RPC.
+- Signing out removes the local Action session, channel, and offline task cache.

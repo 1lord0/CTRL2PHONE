@@ -14,6 +14,7 @@ export interface GlobalKeyRouterPorts {
   // commands
   startSelectionSession(): void;
   captureAndSend(): void;
+  captureAndRunAction?(): void;
   captureAndSendToSupabase(): void;
   captureAndOcr(): void;
   sendClipboardToPhone(): void;
@@ -38,15 +39,28 @@ export function createGlobalKeyRouter(ports: GlobalKeyRouterPorts): GlobalKeyRou
         ports.setStatus('Çift Ctrl ile seçim modu hazır');
         return;
       }
-      if (event === 'HOOK_FAILED') {
-        ports.error('[main.ts] Keyboard hook registration failed in key_listener.exe');
+      if (event === 'HOOK_FAILED' || event.startsWith('HOOK_FAILED:')) {
+        ports.error('[main.ts] Keyboard hook registration failed in key_listener.exe: ' + event);
         ports.setStatus('Klavye kancası takılamadı (Sistem engellemiş olabilir)');
+        return;
+      }
+      if (event === 'HOOK_RESTORED') {
+        ports.log('[main.ts] Keyboard hook restored by key_listener.exe');
+        ports.setStatus('Çift Ctrl ile seçim modu hazır');
         return;
       }
 
       if (event === 'DOUBLE_CTRL') {
         if (!ports.isSelectionActive()) {
           ports.startSelectionSession();
+        }
+      } else if (event === 'KEY_A') {
+        if (ports.isSelectionActive()) {
+          if (!ports.hasSelectionRect()) {
+            ports.setStatus('Önce fareyle bir alan seç.');
+            return;
+          }
+          ports.captureAndRunAction?.();
         }
       } else if (event === 'KEY_X' || event === 'KEY_RETURN') {
         if (ports.isSelectionActive()) {

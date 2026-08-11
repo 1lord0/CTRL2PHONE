@@ -6,9 +6,7 @@ type TestDisplay = { readonly id: number };
 describe('selection session controller', () => {
   function createFixture() {
     let shuttingDown = false;
-    const controller = createSelectionSessionController<TestImage, TestDisplay>(
-      () => shuttingDown
-    );
+    const controller = createSelectionSessionController<TestImage, TestDisplay>(() => shuttingDown);
     return {
       controller,
       shutDownApplication: () => {
@@ -78,6 +76,26 @@ describe('selection session controller', () => {
     expect(controller.isActionCurrent(sessionId)).toBe(true);
     controller.endAction(actionSessionId);
     expect(controller.isActionCurrent(sessionId)).toBe(false);
+  });
+
+  it('allows only one in-flight action across duplicate clicks and newer selections', () => {
+    const { controller } = createFixture();
+    const firstSessionId = controller.start() ?? 0;
+    controller.setDisplay(firstSessionId, { id: 1 });
+    controller.activate(firstSessionId, { name: 'first' });
+
+    expect(controller.beginAction(firstSessionId)).toBe(firstSessionId);
+    expect(controller.beginAction(firstSessionId)).toBeNull();
+
+    controller.reset(firstSessionId);
+    controller.finishStarting(firstSessionId);
+    const secondSessionId = controller.start() ?? 0;
+    controller.setDisplay(secondSessionId, { id: 2 });
+    controller.activate(secondSessionId, { name: 'second' });
+
+    expect(controller.beginAction(secondSessionId)).toBeNull();
+    controller.endAction(firstSessionId);
+    expect(controller.beginAction(secondSessionId)).toBe(secondSessionId);
   });
 
   it('invalidates current work when application shutdown begins', () => {

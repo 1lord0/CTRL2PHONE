@@ -15,6 +15,7 @@ const bridge: OverlayBridgeAPI = {
   onOverlayMessage: (callback) =>
     ipcRenderer.on('overlay-message', (_, message) => callback(message)),
   confirmSelectionGemini: (sessionId) => ipcRenderer.invoke('confirm-selection-gemini', sessionId),
+  confirmSelectionAction: (sessionId) => ipcRenderer.invoke('confirm-selection-action', sessionId),
   confirmSelectionPhone: (sessionId) => ipcRenderer.invoke('confirm-selection-phone', sessionId),
   confirmSelectionOcr: (sessionId) => ipcRenderer.invoke('confirm-selection-ocr', sessionId),
 };

@@ -1,0 +1,147 @@
+{
+  "id": "ctrl2phone-intent-router-v1",
+  "name": "Ctrl2Phone - Intent Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ctrl2phone-action",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3b7d829e-00ae-4ffc-9af3-d6441c41ad11",
+      "name": "Action Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-760, 0],
+      "webhookId": "f3a9f20b-cec0-4bf1-99f2-31d607b04b77",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_N8N_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Ctrl2Phone Webhook Secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ (() => { const b = $json.body; const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i; const hash = /^[0-9a-f]{64}$/; const idem = /^act_[0-9a-f]{64}$/; const intents = ['profile_research','recipe_extraction','general_visual_analysis']; const source = b?.source; const intent = b?.intentAnalysis; const valid = b?.schemaVersion === 1 && uuid.test(b?.taskId ?? '') && uuid.test(b?.channelId ?? '') && idem.test(b?.idempotencyKey ?? '') && hash.test(b?.requestHash ?? '') && b?.expectedVersion === 0 && source?.bucket === 'ctrl2phone-action-inputs' && source?.objectPath === `${b.channelId}/${b.idempotencyKey}.png` && source?.mimeType === 'image/png' && Number.isInteger(source?.byteLength) && source.byteLength >= 8 && source.byteLength <= 15728640 && hash.test(source?.sha256 ?? '') && intent && intents.includes(intent.intentType) && typeof intent.confidence === 'number' && intent.confidence >= 0 && intent.confidence <= 1 && typeof intent.title === 'string' && intent.title.length > 0 && intent.title.length <= 160 && typeof intent.rationale === 'string' && Array.isArray(intent.searchQueries) && intent.searchQueries.length <= 5 && Array.isArray(intent.visibleText) && intent.visibleText.length <= 10; return valid ? 0 : 1; })() }}"
+      },
+      "id": "15cbb30d-0abf-4489-a859-218745ec1865",
+      "name": "Contract Gate",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [-520, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: true, taskId: $json.body.taskId, idempotencyKey: $json.body.idempotencyKey } }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "aef682e5-87d8-4f90-8c78-527fa153956a",
+      "name": "Accepted 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [-280, -100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: false, error: 'invalid_action_contract' } }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "f4640541-8e48-463b-b3b9-752ef67d2706",
+      "name": "Rejected 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [-280, 140]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ ({ profile_research: 0, recipe_extraction: 1, general_visual_analysis: 2 })[$json.body.intentAnalysis.intentType] ?? 2 }}"
+      },
+      "id": "c3243211-a2ea-4bfc-804b-d2c5ee53320d",
+      "name": "Intent Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [-20, -100]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": "ctrl2phone-profile-specialist-v1",
+        "mode": "once",
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "a10fb208-1a7e-494e-af4e-74975b07df6c",
+      "name": "Run Profile Specialist",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [240, -220]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": "ctrl2phone-recipe-specialist-v1",
+        "mode": "once",
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "0d814312-bbf9-41bb-8f60-9efc6dde8e7c",
+      "name": "Run Recipe Specialist",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [240, -100]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": "ctrl2phone-general-specialist-v1",
+        "mode": "once",
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "36005f7f-9e90-46ef-af2d-9843f07ee6f4",
+      "name": "Run General Specialist",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [240, 20]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Action Webhook": {
+      "main": [[{ "node": "Contract Gate", "type": "main", "index": 0 }]]
+    },
+    "Contract Gate": {
+      "main": [
+        [{ "node": "Accepted 202", "type": "main", "index": 0 }],
+        [{ "node": "Rejected 400", "type": "main", "index": 0 }]
+      ]
+    },
+    "Accepted 202": {
+      "main": [[{ "node": "Intent Router", "type": "main", "index": 0 }]]
+    },
+    "Intent Router": {
+      "main": [
+        [{ "node": "Run Profile Specialist", "type": "main", "index": 0 }],
+        [{ "node": "Run Recipe Specialist", "type": "main", "index": 0 }],
+        [{ "node": "Run General Specialist", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "1eb6130b-86ac-46ce-9208-6e957862ec2d",
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}

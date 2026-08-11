@@ -19,4 +19,18 @@ describe('main renderer global-script contract', () => {
     expect(output).toContain('const mainBridge = window.bridge');
     expect(output).toContain("document.body.dataset.rendererReady = 'true'");
   });
+
+  it('renders action task updates through text-only DOM sinks', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer.ts'), 'utf8');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+
+    expect(html).toContain('id="actionResultCard"');
+    expect(html).toContain('id="actionProgressBar"');
+    expect(html).toContain('id="actionSources"');
+    expect(source).toContain('mainBridge.onActionTaskUpdated');
+    expect(source).toContain('actionResultSummary.textContent');
+    expect(source).toContain('url.textContent = source.url');
+    expect(source).not.toContain('actionResultSummary.innerHTML');
+    expect(source).not.toContain('actionSources.innerHTML');
+  });
 });

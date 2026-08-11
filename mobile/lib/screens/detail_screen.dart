@@ -4,8 +4,8 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:gal/gal.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import '../services/photo_image_cache.dart';
 import '../services/supabase_service.dart';
 
 // ============================================================
@@ -22,11 +22,13 @@ import '../services/supabase_service.dart';
 class DetailScreen extends StatefulWidget {
   final List<Photo> photos;
   final int initialIndex;
+  final String accountFingerprint;
 
   const DetailScreen({
     super.key,
     required this.photos,
     required this.initialIndex,
+    required this.accountFingerprint,
   });
 
   @override
@@ -102,14 +104,22 @@ class _DetailScreenState extends State<DetailScreen> {
             builder: (context, index) {
               final photo = widget.photos[index];
               final url = photo.url;
+              final cacheKey = photoImageCacheKey(
+                accountFingerprint: widget.accountFingerprint,
+                storagePath: photo.storagePath,
+              );
 
               return PhotoViewGalleryPageOptions(
-                imageProvider: CachedNetworkImageProvider(url),
+                imageProvider: CachedNetworkImageProvider(
+                  url,
+                  cacheKey: cacheKey,
+                  cacheManager: PhotoImageCache.manager,
+                ),
                 minScale: _minScale,
                 maxScale: _maxScale,
                 initialScale: PhotoViewComputedScale.contained,
                 heroAttributes: PhotoViewHeroAttributes(
-                  tag: 'photo_${photo.id}',
+                  tag: cacheKey,
                 ),
                 errorBuilder: (context, error, stackTrace) => const Center(
                   child: Column(
@@ -224,17 +234,19 @@ class _DetailScreenState extends State<DetailScreen> {
       }
 
       final freshPhoto = await SupabaseService().ensureFreshPhoto(photo);
-      final url = Uri.parse(freshPhoto.url);
-      final response = await http.get(url);
-
-      if (response.statusCode != 200) {
-        throw Exception('Görsel indirilemedi (${response.statusCode})');
-      }
+      final cacheKey = photoImageCacheKey(
+        accountFingerprint: widget.accountFingerprint,
+        storagePath: photo.storagePath,
+      );
+      final cachedFile = await PhotoImageCache.getFile(
+        url: freshPhoto.url,
+        cacheKey: cacheKey,
+      );
 
       final tempDir = await getTemporaryDirectory();
       final tempFile =
           File('${tempDir.path}/${photo.originalName ?? 'screenshot.jpg'}');
-      await tempFile.writeAsBytes(response.bodyBytes);
+      await cachedFile.copy(tempFile.path);
 
       await Gal.putImage(tempFile.path);
 

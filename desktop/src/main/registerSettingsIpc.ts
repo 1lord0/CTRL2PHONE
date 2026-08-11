@@ -4,6 +4,7 @@ import { resolveLang, getStrings } from '../lib/i18n';
 import * as path from 'path';
 import { IpcMain } from 'electron';
 import type { AppSettings } from '../types';
+import type { ActionPairingInvite } from './actionWorkflowRuntime';
 import type { DiagnosticsLogger } from './diagnosticsLogger';
 
 export type NormalizedSettingsUpdate =
@@ -63,6 +64,8 @@ export interface SettingsIpcDeps {
   supabaseRuntime: {
     invalidate(): void;
   };
+  stopActionTaskMonitor(): Promise<void>;
+  createActionPairingInvite(): Promise<ActionPairingInvite>;
   sendKeyListenerConfig(): void;
   setupPhoneSyncPolling(): Promise<void> | void;
   setupClipboardPolling(): void;
@@ -108,6 +111,7 @@ export function registerSettingsIpc(ipc: IpcMain, deps: SettingsIpcDeps): () => 
         deps.mainWindowController.applyCompactPillVisibility();
       }
       if (result.supabaseChanged) {
+        await deps.stopActionTaskMonitor();
         deps.supabaseRuntime.invalidate();
       }
 
@@ -153,6 +157,8 @@ export function registerSettingsIpc(ipc: IpcMain, deps: SettingsIpcDeps): () => 
         aiApiKey: deps.settings.aiApiKey,
         aiModel: deps.settings.aiModel,
         aiBaseUrl: deps.settings.aiBaseUrl,
+        actionWebhookUrl: deps.settings.actionWebhookUrl,
+        actionWebhookSecret: deps.settings.actionWebhookSecret,
         language: deps.settings.language,
         panelPinned: deps.settings.panelPinned ?? false,
         panelMode: deps.mainWindowController.getPanelMode(),
@@ -173,6 +179,8 @@ export function registerSettingsIpc(ipc: IpcMain, deps: SettingsIpcDeps): () => 
       aiApiKey: deps.settings.aiApiKey,
       aiModel: deps.settings.aiModel,
       aiBaseUrl: deps.settings.aiBaseUrl,
+      actionWebhookUrl: deps.settings.actionWebhookUrl,
+      actionWebhookSecret: deps.settings.actionWebhookSecret,
       language: deps.settings.language,
       panelPinned: deps.settings.panelPinned ?? false,
       panelMode: deps.mainWindowController.getPanelMode(),
@@ -200,13 +208,35 @@ export function registerSettingsIpc(ipc: IpcMain, deps: SettingsIpcDeps): () => 
       if (!deps.settings.supabaseUrl || !deps.settings.supabaseKey) {
         return { ok: false, error: 'Supabase ayarları eksik' };
       }
+      let actionPairing: ActionPairingInvite | null = null;
+      let warning: string | undefined;
+      try {
+        actionPairing = await deps.createActionPairingInvite();
+      } catch (error) {
+        warning = error instanceof Error ? error.message.slice(0, 300) : 'action_pairing_failed';
+        deps.diagnostics?.error('action_pairing', 'qr_pairing_invite_failed', error);
+      }
       const data = JSON.stringify({
+        schemaVersion: 2,
         url: deps.settings.supabaseUrl,
         key: deps.settings.supabaseKey,
         bucket: deps.settings.supabaseBucket || 'screenshots',
+        actionPairing: actionPairing
+          ? {
+              version: 1,
+              channelId: actionPairing.channelId,
+              inviteToken: actionPairing.inviteToken,
+              inviteExpiresAt: actionPairing.inviteExpiresAt,
+            }
+          : undefined,
       });
       const dataUrl = await QRCode.toDataURL(data);
-      return { ok: true, dataUrl };
+      return {
+        ok: true,
+        dataUrl,
+        actionPairingIncluded: Boolean(actionPairing),
+        warning,
+      };
     } catch (error: any) {
       console.error('QR Kod oluşturma hatası:', error);
       return { ok: false, error: error.message };

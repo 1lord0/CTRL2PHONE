@@ -127,7 +127,9 @@ export function createSelectionSessionController<Image, Display>(
       };
     },
     beginAction(candidateSessionId) {
-      if (!isCurrent(candidateSessionId)) return null;
+      if (!active || actionInFlightSessionId !== null || !isCurrent(candidateSessionId)) {
+        return null;
+      }
       actionInFlightSessionId = candidateSessionId;
       return candidateSessionId;
     },

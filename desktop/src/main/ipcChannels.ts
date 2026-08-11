@@ -5,6 +5,7 @@ export const IPC_HANDLE_CHANNELS = [
   'cancel-selection',
   'set-annotated',
   'confirm-selection-gemini',
+  'confirm-selection-action',
   'confirm-selection-phone',
   'confirm-selection-ocr',
   'get-storage-usage',

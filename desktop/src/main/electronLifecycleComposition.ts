@@ -79,6 +79,7 @@ export function createElectronLifecycleComposition<
     setupClipboardPolling,
     stopPhoneSyncPolling: () => deps.phoneFileSyncController.stopAndDrain(),
     stopClipboardPolling: () => deps.clipboardSyncController.stopPolling(),
+    stopActionTaskMonitoring: deps.stopActionTaskMonitoring,
     externalCaptureDisplayCache: deps.externalCaptureDisplayCache,
     geminiWindowController: deps.geminiWindowController,
     autoUpdater: deps.autoUpdater,

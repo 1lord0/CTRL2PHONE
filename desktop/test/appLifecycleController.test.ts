@@ -21,6 +21,7 @@ describe('AppLifecycleController', () => {
   let setupClipboardCalled = false;
   let stopPhoneSyncCalled = false;
   let stopClipboardCalled = false;
+  let stopActionTaskCalled = false;
   let geminiPrewarmed = false;
   let checkUpdatesCalled = false;
   let appQuitted = false;
@@ -74,6 +75,7 @@ describe('AppLifecycleController', () => {
     setupClipboardPolling: () => { setupClipboardCalled = true; },
     stopPhoneSyncPolling: () => { stopPhoneSyncCalled = true; },
     stopClipboardPolling: () => { stopClipboardCalled = true; },
+    stopActionTaskMonitoring: () => { stopActionTaskCalled = true; },
     externalCaptureDisplayCache: {
       resolve: async () => { displayCachePrewarmed = true; },
       invalidate: jest.fn(),
@@ -134,6 +136,7 @@ describe('AppLifecycleController', () => {
     setupClipboardCalled = false;
     stopPhoneSyncCalled = false;
     stopClipboardCalled = false;
+    stopActionTaskCalled = false;
     geminiPrewarmed = false;
     checkUpdatesCalled = false;
     appQuitted = false;
@@ -196,6 +199,7 @@ describe('AppLifecycleController', () => {
     expect(keyListenerStopped).toBe(true);
     expect(stopPhoneSyncCalled).toBe(true);
     expect(stopClipboardCalled).toBe(true);
+    expect(stopActionTaskCalled).toBe(true);
     expect(cleanupPhoneDownloadsCalled).toBe(true);
     expect(nativePillHudStopCount).toBe(1);
 

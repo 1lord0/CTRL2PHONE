@@ -9,6 +9,21 @@ export type LanguageSetting = 'system' | Lang;
 export type Strings = Record<string, string>;
 
 const en: Strings = {
+  'status.actionPairingReady': 'Photo and Tasks pairing is included in this QR.',
+  'status.actionPairingMissing':
+    'Photo pairing is ready. Run Secure Setup SQL to enable Tasks pairing.',
+  'label.actionResult': 'Action result',
+  'label.actionSources': 'Sources',
+  'label.actionDetails': 'Structured details',
+  'label.actionConfidence': 'Confidence',
+  'hint.actionPublishedToPhone': 'This task was also published to the paired phone Tasks screen.',
+  'action.status.queued': 'Queued',
+  'action.status.analyzing': 'Analyzing',
+  'action.status.researching': 'Researching',
+  'action.status.completed': 'Completed',
+  'action.status.failed': 'Failed',
+  'action.status.cancelled': 'Cancelled',
+  'action.summary.waiting': 'The live result will appear here as the workflow progresses.',
   'meta.lang': 'en',
   'app.title': 'Ctrl2Phone - Screen Capture',
   'hero.eyebrow': 'Windows screen tool',
@@ -46,6 +61,11 @@ const en: Strings = {
   'ph.aiBaseUrl': 'http://localhost:11434/v1',
   'hint.aiProvider':
     'In "Web" mode the image is pasted into gemini.google.com. Pick an API provider and enter a key, and the selected region is sent to the API with the reply shown right here.',
+  'label.actionSettingsHeader': 'n8n Action Settings',
+  'label.actionWebhookUrl': 'n8n Action webhook URL',
+  'label.actionWebhookSecret': 'n8n webhook secret (encrypted on this device)',
+  'hint.actionWebhook':
+    'This must match CTRL2PHONE_WEBHOOK_SECRET in automation/n8n/.env and contain at least 32 characters.',
   'label.storage': 'Supabase Cloud Storage',
   'label.qr': 'To pair via QR from the phone Settings:',
   'btn.save': 'Save settings',
@@ -105,6 +125,22 @@ const en: Strings = {
 };
 
 const tr: Strings = {
+  'status.actionPairingReady': 'FotoÄŸraf ve Tasks eÅŸleÅŸtirmesi bu QR koduna eklendi.',
+  'status.actionPairingMissing':
+    'FotoÄŸraf eÅŸleÅŸtirmesi hazÄ±r. Tasks iÃ§in GÃ¼venli Kurulum SQL dosyasÄ±nÄ± Ã§alÄ±ÅŸtÄ±rÄ±n.',
+  'label.actionResult': 'Action sonucu',
+  'label.actionSources': 'Kaynaklar',
+  'label.actionDetails': 'YapÄ±landÄ±rÄ±lmÄ±ÅŸ detaylar',
+  'label.actionConfidence': 'GÃ¼ven',
+  'hint.actionPublishedToPhone':
+    'Bu gÃ¶rev, eÅŸleÅŸtirilen telefonun Tasks ekranÄ±na da yayÄ±nlandÄ±.',
+  'action.status.queued': 'SÄ±rada',
+  'action.status.analyzing': 'Analiz ediliyor',
+  'action.status.researching': 'AraÅŸtÄ±rÄ±lÄ±yor',
+  'action.status.completed': 'TamamlandÄ±',
+  'action.status.failed': 'BaÅŸarÄ±sÄ±z',
+  'action.status.cancelled': 'Ä°ptal edildi',
+  'action.summary.waiting': 'Ä°ÅŸ akÄ±ÅŸÄ± ilerledikÃ§e canlÄ± sonuÃ§ burada gÃ¶rÃ¼necek.',
   'meta.lang': 'tr',
   'app.title': 'Ctrl2Phone - Ekran Yakalama',
   'hero.eyebrow': 'Windows ekran aracı',
@@ -142,6 +178,11 @@ const tr: Strings = {
   'ph.aiBaseUrl': 'http://localhost:11434/v1',
   'hint.aiProvider':
     '"Web" modunda görsel gemini.google.com\'a yapıştırılır. Bir API sağlayıcı seçip anahtar girersen, seçtiğin alan API\'ye gönderilir ve yanıt doğrudan burada gösterilir.',
+  'label.actionSettingsHeader': 'n8n Action Ayarları',
+  'label.actionWebhookUrl': 'n8n Action webhook adresi',
+  'label.actionWebhookSecret': 'n8n webhook gizli anahtarı (cihazda şifreli)',
+  'hint.actionWebhook':
+    'Bu değer automation/n8n/.env içindeki CTRL2PHONE_WEBHOOK_SECRET ile aynı ve en az 32 karakter olmalıdır.',
   'label.storage': 'Supabase Bulut Depolama',
   'label.qr': 'Telefonda Ayarlardan QR ile Eşitlemek İçin:',
   'btn.save': 'Ayarları kaydet',

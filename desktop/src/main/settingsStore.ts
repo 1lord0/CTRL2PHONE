@@ -53,6 +53,8 @@ export function createDefaultSettings(): AppSettings {
     aiApiKey: '',
     aiModel: '',
     aiBaseUrl: '',
+    actionWebhookUrl: 'http://127.0.0.1:5678/webhook/ctrl2phone-action',
+    actionWebhookSecret: '7e3d9a1b4c2f8e0d5a6b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f',
     language: 'system',
     panelPinned: false,
     pillVisibility: 'background',
@@ -78,6 +80,7 @@ export function createSettingsStore(
       applyPersistedSettings(settings, parsed);
       decryptSecret(settings, 'supabaseKey', 'Supabase', ports);
       decryptSecret(settings, 'aiApiKey', 'AI', ports);
+      decryptSecret(settings, 'actionWebhookSecret', 'Action webhook', ports);
       ports.logger.info('Ayarlar dosyadan yüklendi:', settingsPath);
     } catch (error: unknown) {
       if (!(error instanceof Error)) throw error;
@@ -94,6 +97,9 @@ export function createSettingsStore(
         }
         if (settings.aiApiKey) {
           persisted.aiApiKey = ports.encryption.encrypt(settings.aiApiKey);
+        }
+        if (settings.actionWebhookSecret) {
+          persisted.actionWebhookSecret = ports.encryption.encrypt(settings.actionWebhookSecret);
         }
       }
       const settingsPath = ports.persistence.resolvePath();
@@ -172,6 +178,8 @@ function assignString(
     | 'aiApiKey'
     | 'aiModel'
     | 'aiBaseUrl'
+    | 'actionWebhookUrl'
+    | 'actionWebhookSecret'
   >,
   value: unknown
 ): void {
@@ -186,6 +194,8 @@ function applySharedSettings(target: AppSettings, source: Record<string, unknown
   assignString(target, 'aiApiKey', source.aiApiKey);
   assignString(target, 'aiModel', source.aiModel);
   assignString(target, 'aiBaseUrl', source.aiBaseUrl);
+  assignString(target, 'actionWebhookUrl', source.actionWebhookUrl);
+  assignString(target, 'actionWebhookSecret', source.actionWebhookSecret);
   if (typeof source.autoCopyFromPhone === 'boolean') {
     target.autoCopyFromPhone = source.autoCopyFromPhone;
   }
@@ -217,7 +227,7 @@ function applyRendererSettings(target: AppSettings, source: Partial<AppSettings>
 
 function decryptSecret(
   settings: AppSettings,
-  key: 'supabaseKey' | 'aiApiKey',
+  key: 'supabaseKey' | 'aiApiKey' | 'actionWebhookSecret',
   label: string,
   ports: SettingsStorePorts
 ): void {

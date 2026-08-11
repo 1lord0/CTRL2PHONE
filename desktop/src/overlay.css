@@ -198,6 +198,16 @@ body.overlay-body.annotating .selection-box {
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.5);
 }
 
+.action-btn.action {
+  background: linear-gradient(135deg, #f472b6 0%, #7c3aed 100%);
+  border: none;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.38);
+}
+
+.action-btn.action:hover {
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.55);
+}
+
 .action-btn.gemini:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(139, 92, 246, 0.5);

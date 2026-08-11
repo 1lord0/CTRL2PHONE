@@ -39,6 +39,7 @@ export interface SelectionIpcDeps {
   getCursorScreenPoint(): any;
   updateSelectionDragAsset(sessionId: number): Promise<void>;
   captureAndSend(sessionId: number): Promise<void>;
+  captureAndRunAction(sessionId: number): Promise<boolean>;
   captureAndSendToSupabase(sessionId: number): Promise<boolean>;
   captureAndOcr(sessionId: number): Promise<void>;
   isShutdownStarted(): boolean;
@@ -179,6 +180,19 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
     return { ok: false };
   });
 
+  ipc.handle('confirm-selection-action', async (event: any, sessionId: number) => {
+    if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
+    deps.diagnostics?.action('selection.action_requested', { sessionId });
+    if (
+      deps.selectionSession.active &&
+      deps.selectionSession.rect &&
+      deps.selectionSession.isCurrent(sessionId)
+    ) {
+      return { ok: await deps.captureAndRunAction(sessionId) };
+    }
+    return { ok: false };
+  });
+
   ipc.handle('confirm-selection-phone', async (event: any, sessionId: number) => {
     if (!deps.isOverlaySender(event.sender)) return { ok: false, error: 'Unauthorized' };
     deps.diagnostics?.action('selection.send_to_phone_requested', { sessionId });
@@ -313,6 +327,7 @@ export function registerSelectionIpc(ipc: IpcMain, deps: SelectionIpcDeps): () =
     ipc.removeHandler('cancel-selection');
     ipc.removeHandler('set-annotated');
     ipc.removeHandler('confirm-selection-gemini');
+    ipc.removeHandler('confirm-selection-action');
     ipc.removeHandler('confirm-selection-phone');
     ipc.removeHandler('confirm-selection-ocr');
     ipc.removeHandler('capture-now');

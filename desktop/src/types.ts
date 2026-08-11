@@ -20,6 +20,10 @@ export interface AppSettings {
   aiModel: string;
   /** Base URL for the 'custom' OpenAI-compatible provider (Ollama, LM Studio, OpenRouter…). */
   aiBaseUrl: string;
+  /** n8n webhook endpoint. Plain HTTP is accepted only for a loopback host. */
+  actionWebhookUrl: string;
+  /** Shared n8n webhook secret. Stored safeStorage-encrypted at rest. */
+  actionWebhookSecret: string;
   /** Interface language. 'system' follows the OS locale (Turkish → tr, else en). */
   language: 'system' | 'en' | 'tr';
   /** Last floating panel position (screen coordinates). */
@@ -38,6 +42,43 @@ export interface AppSettings {
 
 export type PanelMode = 'compact' | 'presented';
 export type PillVisibility = NonNullable<AppSettings['pillVisibility']>;
+
+export type ActionTaskIntentType =
+  | 'pending'
+  | 'profile_research'
+  | 'recipe_extraction'
+  | 'general_visual_analysis';
+
+export type ActionTaskWorkflowStatus =
+  | 'queued'
+  | 'analyzing'
+  | 'researching'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface ActionTaskSource {
+  readonly title: string;
+  readonly url: string;
+}
+
+export interface ActionTaskSnapshot {
+  readonly id: string;
+  readonly intentType: ActionTaskIntentType;
+  readonly workflowStatus: ActionTaskWorkflowStatus;
+  readonly progress: number;
+  readonly title: string;
+  readonly summary: string | null;
+  readonly resultJson: Readonly<Record<string, unknown>>;
+  readonly sources: readonly ActionTaskSource[];
+  readonly confidence: number | null;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+  readonly version: number;
+  readonly sentToPhone: boolean;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+}
 
 export interface Rect {
   x: number;
@@ -83,7 +124,13 @@ export type MainBridgeAPI = {
   readonly saveSettings: (
     settings: Partial<AppSettings>
   ) => Promise<{ ok: boolean; error?: string }>;
-  readonly generateQr: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
+  readonly generateQr: () => Promise<{
+    ok: boolean;
+    dataUrl?: string;
+    error?: string;
+    warning?: string;
+    actionPairingIncluded?: boolean;
+  }>;
   readonly captureNow: () => Promise<{ ok: boolean; mode?: string }>;
   readonly openGemini: () => Promise<{ ok: boolean }>;
   readonly focusGemini: () => Promise<{ ok: boolean }>;
@@ -114,10 +161,12 @@ export type MainBridgeAPI = {
   readonly onPillResized: (callback: (size: { width: number; height: number }) => void) => void;
   readonly onStatus: (callback: (message: string) => void) => void;
   readonly onResponse: (callback: (message: string) => void) => void;
+  readonly onActionTaskUpdated: (callback: (task: ActionTaskSnapshot) => void) => void;
   readonly onOverlayMessage: (callback: (message: string) => void) => void;
   readonly uploadFileToPhone: (filePath: string) => Promise<{ ok: boolean }>;
   readonly startDragDownloadedFile: (filePath: string) => void;
   readonly deleteDownloadedFile: (filePath: string) => Promise<{ ok: boolean }>;
+  readonly sendActionToPhone: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
   readonly logUserAction: (action: string, details?: Readonly<Record<string, unknown>>) => void;
   readonly onPhoneDownloadsUpdated: (
     callback: (files: Array<{ path: string; name: string; isImage: boolean }>) => void
@@ -140,6 +189,7 @@ export type OverlayBridgeAPI = {
   readonly onOverlayState: (callback: (state: OverlayState) => void) => void;
   readonly onOverlayMessage: (callback: (message: string) => void) => void;
   readonly confirmSelectionGemini: (sessionId: number) => Promise<{ ok: boolean }>;
+  readonly confirmSelectionAction: (sessionId: number) => Promise<{ ok: boolean }>;
   readonly confirmSelectionPhone: (sessionId: number) => Promise<{ ok: boolean }>;
   readonly confirmSelectionOcr: (sessionId: number) => Promise<{ ok: boolean }>;
 };

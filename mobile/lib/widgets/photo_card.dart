@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../services/photo_image_cache.dart';
 
 // ============================================================
 // Photo Card: Grid'deki tek bir fotoğraf öğesi
@@ -12,11 +13,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 
 class PhotoCard extends StatelessWidget {
   final String imageUrl;
+  final String cacheKey;
   final VoidCallback onTap;
 
   const PhotoCard({
     super.key,
     required this.imageUrl,
+    required this.cacheKey,
     required this.onTap,
   });
 
@@ -25,11 +28,13 @@ class PhotoCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Hero(
-        tag: imageUrl,
+        tag: cacheKey,
         child: Container(
           color: Colors.grey[200],
           child: CachedNetworkImage(
             imageUrl: imageUrl,
+            cacheKey: cacheKey,
+            cacheManager: PhotoImageCache.manager,
             fit: BoxFit.cover,
             placeholder: (context, url) => Container(
               color: Colors.grey[300],

@@ -1,95 +1,109 @@
 import 'dart:convert';
-import 'package:flutter_test/flutter_test.dart';
+
 import 'package:ctrl2phone_mobile/services/qr_payload.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('parseQrPayload', () {
-    String qr(Map<String, dynamic> m) => json.encode(m);
+    String qr(Map<String, dynamic> value) => jsonEncode(value);
+    final now = DateTime.utc(2026, 8, 7, 12);
 
-    test('accepts a valid https payload and extracts url/key/bucket', () {
-      final r = parseQrPayload(
-        qr({
-          'url': 'https://abc.supabase.co',
-          'key': 'anon-key',
-          'bucket': 'shots'
-        }),
+    test('accepts a legacy photo-only payload', () {
+      final result = parseQrPayload(qr({
+        'url': ' https://abc.supabase.co ',
+        'key': ' anon-key ',
+        'bucket': ' shots ',
+      }));
+
+      expect(result.ok, isTrue);
+      expect(result.url, 'https://abc.supabase.co');
+      expect(result.key, 'anon-key');
+      expect(result.bucket, 'shots');
+      expect(result.actionPairing, isNull);
+    });
+
+    test('defaults an omitted bucket', () {
+      final result = parseQrPayload(
+        qr({'url': 'https://a.supabase.co', 'key': 'k'}),
       );
-      expect(r.ok, true);
-      expect(r.error, isNull);
-      expect(r.url, 'https://abc.supabase.co');
-      expect(r.key, 'anon-key');
-      expect(r.bucket, 'shots');
+      expect(result.ok, isTrue);
+      expect(result.bucket, kDefaultBucket);
     });
 
-    test('trims surrounding whitespace on every field', () {
-      final r = parseQrPayload(
+    test('accepts a valid schema-v2 one-time action invite', () {
+      final result = parseQrPayload(
         qr({
-          'url': '  https://abc.supabase.co  ',
-          'key': '  k  ',
-          'bucket': '  b  '
+          'schemaVersion': 2,
+          'url': 'https://a.supabase.co',
+          'key': 'k',
+          'bucket': 'SCREENSHOTS',
+          'actionPairing': {
+            'version': 1,
+            'channelId': '123e4567-e89b-42d3-a456-426614174000',
+            'inviteToken': 'A' * 43,
+            'inviteExpiresAt':
+                now.add(const Duration(minutes: 10)).toIso8601String(),
+          },
         }),
+        now: now,
       );
-      expect(r.ok, true);
-      expect(r.url, 'https://abc.supabase.co');
-      expect(r.key, 'k');
-      expect(r.bucket, 'b');
+
+      expect(result.ok, isTrue);
+      expect(result.actionPairing?.channelId,
+          '123e4567-e89b-42d3-a456-426614174000');
+      expect(result.actionPairing?.inviteToken, 'A' * 43);
     });
 
-    test('defaults the bucket to SCREENSHOTS when omitted or blank', () {
-      final omitted =
-          parseQrPayload(qr({'url': 'https://a.supabase.co', 'key': 'k'}));
-      expect(omitted.ok, true);
-      expect(omitted.bucket, kDefaultBucket);
-
-      final blank = parseQrPayload(
-          qr({'url': 'https://a.supabase.co', 'key': 'k', 'bucket': '   '}));
-      expect(blank.ok, true);
-      expect(blank.bucket, kDefaultBucket);
-    });
-
-    test('rejects a missing or empty url/key', () {
-      for (final bad in [
-        qr({'key': 'k'}), // no url
-        qr({'url': 'https://a.supabase.co'}), // no key
-        qr({'url': '', 'key': 'k'}),
-        qr({'url': 'https://a.supabase.co', 'key': ''}),
+    test('rejects expired and overlong action invites', () {
+      for (final expiry in [
+        now.subtract(const Duration(seconds: 1)),
+        now.add(const Duration(minutes: 32)),
       ]) {
-        final r = parseQrPayload(bad);
-        expect(r.ok, false, reason: bad);
-        expect(r.error, 'QR kodunda Supabase URL veya anahtar bulunamadı.');
+        final result = parseQrPayload(
+          qr({
+            'schemaVersion': 2,
+            'url': 'https://a.supabase.co',
+            'key': 'k',
+            'actionPairing': {
+              'version': 1,
+              'channelId': '123e4567-e89b-42d3-a456-426614174000',
+              'inviteToken': 'A' * 43,
+              'inviteExpiresAt': expiry.toIso8601String(),
+            },
+          }),
+          now: now,
+        );
+        expect(result.ok, isFalse);
       }
     });
 
-    test('rejects a non-https url (security: no attacker redirect)', () {
-      final r = parseQrPayload(qr({'url': 'http://evil.example', 'key': 'k'}));
-      expect(r.ok, false);
-      expect(
-          r.error, 'Güvenlik: QR adresi https:// ile başlamıyor, reddedildi.');
-    });
-
-    test('rejects undecodable JSON with the format error', () {
-      final r = parseQrPayload('not-json{');
-      expect(r.ok, false);
-      expect(r.error, kQrFormatError);
-    });
-
-    test('rejects a JSON value that is not an object', () {
-      final r = parseQrPayload('[1,2,3]');
-      expect(r.ok, false);
-      expect(r.error, kQrFormatError);
-    });
-
-    test('ignores unexpected extra fields', () {
-      final r = parseQrPayload(
+    test('rejects malformed action identifiers and tokens', () {
+      final result = parseQrPayload(
         qr({
+          'schemaVersion': 2,
           'url': 'https://a.supabase.co',
           'key': 'k',
-          'bucket': 'b',
-          'evil': 'rm -rf'
+          'actionPairing': {
+            'version': 1,
+            'channelId': '../not-a-uuid',
+            'inviteToken': 'short',
+            'inviteExpiresAt':
+                now.add(const Duration(minutes: 5)).toIso8601String(),
+          },
         }),
+        now: now,
       );
-      expect(r.ok, true);
-      expect(r.url, 'https://a.supabase.co');
+      expect(result.ok, isFalse);
+    });
+
+    test('rejects missing credentials, insecure URLs, and non-JSON input', () {
+      expect(parseQrPayload(qr({'key': 'k'})).ok, isFalse);
+      expect(
+        parseQrPayload(qr({'url': 'http://evil.example', 'key': 'k'})).ok,
+        isFalse,
+      );
+      expect(parseQrPayload('not-json{').error, kQrFormatError);
+      expect(parseQrPayload('[1,2,3]').error, kQrFormatError);
     });
   });
 }

@@ -23,6 +23,8 @@ const aiApiKeyInput = document.getElementById('aiApiKey') as HTMLInputElement;
 const aiModelInput = document.getElementById('aiModel') as HTMLInputElement;
 const aiBaseUrlInput = document.getElementById('aiBaseUrl') as HTMLInputElement;
 const aiBaseUrlRow = document.getElementById('aiBaseUrlRow') as HTMLElement;
+const actionWebhookUrlInput = document.getElementById('actionWebhookUrl') as HTMLInputElement;
+const actionWebhookSecretInput = document.getElementById('actionWebhookSecret') as HTMLInputElement;
 const uiLanguageInput = document.getElementById('uiLanguage') as HTMLSelectElement;
 const pillVisibilityInput = document.getElementById('pillVisibility') as HTMLSelectElement;
 const statusNode = document.getElementById('status') as HTMLElement;
@@ -33,6 +35,21 @@ const dismissPanelBtn = document.getElementById('dismissPanel') as HTMLButtonEle
 const pinPanelBtn = document.getElementById('pinPanel') as HTMLButtonElement;
 const saveSettingsBtn = document.getElementById('saveSettings') as HTMLButtonElement;
 const qrCodeImage = document.getElementById('qrCodeImage') as HTMLImageElement;
+const qrPairingStatus = document.getElementById('qrPairingStatus') as HTMLElement;
+const actionResultCard = document.getElementById('actionResultCard') as HTMLElement;
+const actionResultTitle = document.getElementById('actionResultTitle') as HTMLElement;
+const actionResultStatus = document.getElementById('actionResultStatus') as HTMLElement;
+const actionProgressTrack = document.getElementById('actionProgressTrack') as HTMLElement;
+const actionProgressBar = document.getElementById('actionProgressBar') as HTMLElement;
+const actionResultProgress = document.getElementById('actionResultProgress') as HTMLElement;
+const actionResultConfidence = document.getElementById('actionResultConfidence') as HTMLElement;
+const actionResultSummary = document.getElementById('actionResultSummary') as HTMLElement;
+const actionSourcesBlock = document.getElementById('actionSourcesBlock') as HTMLElement;
+const actionSources = document.getElementById('actionSources') as HTMLUListElement;
+const actionResultDetails = document.getElementById('actionResultDetails') as HTMLDetailsElement;
+const actionResultJson = document.getElementById('actionResultJson') as HTMLElement;
+const sendActionToPhoneBtn = document.getElementById('sendActionToPhone') as HTMLButtonElement;
+const actionPhoneNote = document.getElementById('actionPhoneNote') as HTMLElement;
 
 const storageContainer = document.getElementById('storageContainer') as HTMLElement;
 const storageText = document.getElementById('storageText') as HTMLElement;
@@ -88,6 +105,8 @@ let responseDirty = false;
 let storageUsageRequestId = 0;
 let settingsSaveInFlight = false;
 let panelPinned = false;
+let qrCodeRequestId = 0;
+let latestActionTask: import('./types').ActionTaskSnapshot | null = null;
 const supabaseDraft = {
   url: '',
   key: '',
@@ -206,18 +225,102 @@ function showResponse(text: string): void {
   responseNode.textContent = text;
 }
 
+function actionStatusText(status: import('./types').ActionTaskWorkflowStatus): string {
+  const labels: Record<import('./types').ActionTaskWorkflowStatus, [string, string]> = {
+    queued: ['action.status.queued', 'Queued'],
+    analyzing: ['action.status.analyzing', 'Analyzing'],
+    researching: ['action.status.researching', 'Researching'],
+    completed: ['action.status.completed', 'Completed'],
+    failed: ['action.status.failed', 'Failed'],
+    cancelled: ['action.status.cancelled', 'Cancelled'],
+  };
+  const [key, fallback] = labels[status];
+  return t(key, fallback);
+}
+
+function renderActionTask(task: import('./types').ActionTaskSnapshot): void {
+  latestActionTask = task;
+  actionResultCard.classList.remove('hidden');
+  actionResultCard.dataset.status = task.workflowStatus;
+  actionResultTitle.textContent = task.title;
+  actionResultStatus.textContent = actionStatusText(task.workflowStatus);
+  actionResultStatus.className = `action-status-badge is-${task.workflowStatus}`;
+  actionProgressBar.style.width = `${Math.max(0, Math.min(100, task.progress))}%`;
+  actionProgressTrack.setAttribute('aria-valuenow', String(task.progress));
+  actionResultProgress.textContent = `${task.progress}%`;
+  actionResultConfidence.textContent =
+    task.confidence === null
+      ? ''
+      : `${t('label.actionConfidence', 'Confidence')}: ${Math.round(task.confidence * 100)}%`;
+
+  const failureText = task.errorMessage || task.errorCode;
+  actionResultSummary.textContent =
+    failureText ||
+    task.summary ||
+    t('action.summary.waiting', 'The live result will appear here as the workflow progresses.');
+
+  actionSources.replaceChildren();
+  for (const source of task.sources) {
+    const item = document.createElement('li');
+    const title = document.createElement('strong');
+    const url = document.createElement('span');
+    title.textContent = source.title;
+    url.textContent = source.url;
+    item.append(title, url);
+    actionSources.append(item);
+  }
+  actionSourcesBlock.classList.toggle('hidden', task.sources.length === 0);
+
+  const hasResult = Object.keys(task.resultJson).length > 0;
+  actionResultJson.textContent = hasResult ? JSON.stringify(task.resultJson, null, 2) : '';
+  actionResultDetails.classList.toggle('hidden', !hasResult);
+
+  // Manage manual "Send to Phone" button and hint text
+  if (task.workflowStatus === 'completed') {
+    if (task.sentToPhone) {
+      sendActionToPhoneBtn.classList.add('hidden');
+      actionPhoneNote.classList.remove('hidden');
+    } else {
+      sendActionToPhoneBtn.classList.remove('hidden');
+      sendActionToPhoneBtn.disabled = false;
+      sendActionToPhoneBtn.textContent = t('btn.sendActionToPhone', 'Telefona Gönder');
+      actionPhoneNote.classList.add('hidden');
+    }
+  } else {
+    sendActionToPhoneBtn.classList.add('hidden');
+    actionPhoneNote.classList.add('hidden');
+  }
+}
+
 async function updateQrCode(): Promise<void> {
+  const requestId = ++qrCodeRequestId;
   try {
     const result = await mainBridge.generateQr();
+    if (requestId !== qrCodeRequestId) return;
     if (result?.ok && result.dataUrl) {
       qrCodeImage.src = result.dataUrl;
       qrCodeImage.classList.remove('hidden');
+      qrCodeImage.dataset.actionPairing = result.actionPairingIncluded ? 'included' : 'legacy';
+      qrPairingStatus.classList.remove('hidden', 'is-warning', 'is-ready');
+      qrPairingStatus.classList.add(result.actionPairingIncluded ? 'is-ready' : 'is-warning');
+      qrPairingStatus.textContent = result.actionPairingIncluded
+        ? t('status.actionPairingReady', 'Photo and Tasks pairing is included in this QR.')
+        : t(
+            'status.actionPairingMissing',
+            'Photo pairing is ready. Run Secure Setup SQL to enable Tasks pairing.'
+          );
+      if (result.warning) {
+        console.warn('Action pairing was not included in the QR payload:', result.warning);
+      }
     } else {
       qrCodeImage.classList.add('hidden');
+      qrPairingStatus.classList.add('hidden');
     }
   } catch (e) {
+    if (requestId !== qrCodeRequestId) return;
     console.error('QR Kod yükleme hatası:', e);
     qrCodeImage.classList.add('hidden');
+    qrPairingStatus.classList.add('hidden');
   }
 }
 
@@ -286,6 +389,13 @@ function loadSettings(state: any): void {
   if (aiBaseUrlInput) {
     aiBaseUrlInput.value = state.aiBaseUrl || '';
   }
+  if (actionWebhookUrlInput) {
+    actionWebhookUrlInput.value =
+      state.actionWebhookUrl || 'http://127.0.0.1:5678/webhook/ctrl2phone-action';
+  }
+  if (actionWebhookSecretInput) {
+    actionWebhookSecretInput.value = state.actionWebhookSecret || '';
+  }
   if (uiLanguageInput) {
     uiLanguageInput.value = state.language || 'system';
   }
@@ -296,6 +406,7 @@ function loadSettings(state: any): void {
   updatePinUi();
   setPanelVisualMode('presented');
   updateAiProviderUi();
+  if (latestActionTask) renderActionTask(latestActionTask);
   // Only (re)apply the localized placeholders while no live runtime message is shown,
   // so switching language never wipes an AI reply / signed URL / OCR text.
   if (!statusDirty) {
@@ -350,6 +461,10 @@ mainBridge.onResponse((message) => {
   updateStorageUsage();
 });
 
+mainBridge.onActionTaskUpdated((task) => {
+  renderActionTask(task);
+});
+
 mainBridge.onOverlayMessage((message) => {
   const overlayText = document.getElementById('overlayText');
   if (overlayText) {
@@ -390,6 +505,9 @@ async function saveSettingsFromForm(): Promise<void> {
     aiApiKey: aiApiKeyInput?.value.trim() ?? '',
     aiModel: aiModelInput?.value.trim() ?? '',
     aiBaseUrl: aiBaseUrlInput?.value.trim() ?? '',
+    actionWebhookUrl:
+      actionWebhookUrlInput?.value.trim() || 'http://127.0.0.1:5678/webhook/ctrl2phone-action',
+    actionWebhookSecret: actionWebhookSecretInput?.value.trim() ?? '',
     language: (uiLanguageInput?.value as 'system' | 'en' | 'tr') || 'system',
     pillVisibility:
       (pillVisibilityInput?.value as 'always' | 'background' | 'capture-only') || 'always',
@@ -427,6 +545,35 @@ saveSettingsBtn.addEventListener('click', () => {
   void saveSettingsFromForm();
 });
 saveSettingsBtn.dataset.handlerBound = 'true';
+
+sendActionToPhoneBtn.addEventListener('click', async () => {
+  if (!latestActionTask) return;
+  sendActionToPhoneBtn.disabled = true;
+  sendActionToPhoneBtn.textContent = t('btn.sending', 'Gönderiliyor...');
+  try {
+    const result = await mainBridge.sendActionToPhone(latestActionTask.id);
+    if (result && result.ok) {
+      sendActionToPhoneBtn.classList.add('hidden');
+      actionPhoneNote.classList.remove('hidden');
+      // Update local cache state
+      if (latestActionTask) {
+        latestActionTask = {
+          ...latestActionTask,
+          sentToPhone: true,
+        };
+      }
+    } else {
+      sendActionToPhoneBtn.disabled = false;
+      sendActionToPhoneBtn.textContent = t('btn.sendActionToPhone', 'Telefona Gönder');
+      showStatus(result?.error || t('status.sendToPhoneFailed', 'Telefona gönderilemedi.'));
+    }
+  } catch (err: any) {
+    sendActionToPhoneBtn.disabled = false;
+    sendActionToPhoneBtn.textContent = t('btn.sendActionToPhone', 'Telefona Gönder');
+    showStatus(`${t('status.sendToPhoneFailed', 'Telefona gönderilemedi.')}: ${err.message}`);
+  }
+});
+
 document.body.dataset.rendererCheckpoint = 'save-bound';
 
 const diagnosticSafeEnumFields = new Set([

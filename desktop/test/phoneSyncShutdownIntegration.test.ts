@@ -244,6 +244,7 @@ describe('phone sync and shutdown integration', () => {
         shutdownOrder.push('drain');
       },
       stopClipboardPolling: () => {},
+      stopActionTaskMonitoring: () => {},
       externalCaptureDisplayCache: { resolve: async () => {}, invalidate: () => {} } as any,
       geminiWindowController: { ensureLoaded: async () => {}, destroy: () => {} } as any,
       autoUpdater: { checkForUpdatesAndNotify: async () => {} } as any,
@@ -288,6 +289,7 @@ describe('phone sync and shutdown integration', () => {
       setupClipboardPolling: () => {},
       stopPhoneSyncPolling: async () => {},
       stopClipboardPolling: async () => {},
+      stopActionTaskMonitoring: async () => {},
       externalCaptureDisplayCache: { resolve: async () => {}, invalidate: () => {} } as any,
       geminiWindowController: { ensureLoaded: async () => {}, destroy: () => {} } as any,
       autoUpdater: { checkForUpdatesAndNotify: async () => {} } as any,

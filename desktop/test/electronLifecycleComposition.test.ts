@@ -6,6 +6,7 @@ describe('Electron lifecycle composition', () => {
     const phoneStop = jest.fn().mockResolvedValue(undefined);
     const clipboardSetup = jest.fn();
     const clipboardStop = jest.fn().mockResolvedValue(undefined);
+    const actionTaskStop = jest.fn().mockResolvedValue(undefined);
     const cleanupDownloads = jest.fn().mockResolvedValue(undefined);
     const cleanupStaleFiles = jest.fn();
     const invalidateDragAsset = jest.fn();
@@ -37,6 +38,7 @@ describe('Electron lifecycle composition', () => {
       phoneDownloadAdapter: { cleanupDownloads },
       phoneFileSyncController: { setup: phoneSetup, stopAndDrain: phoneStop },
       clipboardSyncController: { setupPolling: clipboardSetup, stopPolling: clipboardStop },
+      stopActionTaskMonitoring: actionTaskStop,
       externalCaptureDisplayCache: { resolve: jest.fn(), invalidate: jest.fn() },
       geminiWindowController: { destroy: jest.fn() },
       autoUpdater: {},
@@ -57,11 +59,15 @@ describe('Electron lifecycle composition', () => {
     expect(clipboardSetup).toHaveBeenCalledTimes(1);
     expect(phoneStop).toHaveBeenCalledTimes(1);
     expect(clipboardStop).toHaveBeenCalledTimes(1);
+    expect(actionTaskStop).toHaveBeenCalledTimes(1);
     expect(cleanupDownloads).toHaveBeenCalledTimes(1);
     expect(phoneStop.mock.invocationCallOrder[0]).toBeLessThan(
       clipboardStop.mock.invocationCallOrder[0]
     );
     expect(clipboardStop.mock.invocationCallOrder[0]).toBeLessThan(
+      actionTaskStop.mock.invocationCallOrder[0]
+    );
+    expect(actionTaskStop.mock.invocationCallOrder[0]).toBeLessThan(
       cleanupDownloads.mock.invocationCallOrder[0]
     );
     expect(invalidateDragAsset).toHaveBeenCalledTimes(1);

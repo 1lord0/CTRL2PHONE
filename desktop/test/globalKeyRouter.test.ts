@@ -103,10 +103,18 @@ describe('GlobalKeyRouter', () => {
     expect(captureSendCalled).toBe(true);
   });
 
-  it('handles action route bindings for KEY_M (Supabase) and KEY_C (OCR)', () => {
-    const router = createGlobalKeyRouter(ports);
+  it('handles action route bindings for KEY_A (Action), KEY_M (Supabase), and KEY_C (OCR)', () => {
+    let captureActionCalled = false;
+    const testPorts: GlobalKeyRouterPorts = {
+      ...ports,
+      captureAndRunAction: () => { captureActionCalled = true; },
+    };
+    const router = createGlobalKeyRouter(testPorts);
     selectionActive = true;
     hasRect = true;
+
+    router.route('KEY_A');
+    expect(captureActionCalled).toBe(true);
 
     router.route('KEY_M');
     expect(captureSupabaseCalled).toBe(true);

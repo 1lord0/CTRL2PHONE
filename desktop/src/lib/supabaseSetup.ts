@@ -5,6 +5,10 @@
  *
  * Pure string builder so it can be unit-tested without Electron.
  */
+import { buildActionChannelSetupSql } from './actionChannelSetup';
+import { buildActionInputStorageSetupSql } from './actionInputStorageSetup';
+import { buildActionTaskSetupSql } from './actionTaskSetup';
+
 export const CLIPBOARD_CONTENT_MAX_LENGTH = 10_000;
 
 export function buildRlsSetupSql(bucketRaw: string): string {
@@ -94,6 +98,15 @@ create policy "ctrl2phone_clipboard_insert" on public.clipboard_sync
 drop policy if exists "ctrl2phone_clipboard_delete" on public.clipboard_sync;
 create policy "ctrl2phone_clipboard_delete" on public.clipboard_sync
   for delete to anon, authenticated using (true);
+
+${buildActionChannelSetupSql()}
+
+${buildActionTaskSetupSql()}
+
+${buildActionInputStorageSetupSql()}
+
+-- Migration: Ensure sent_to_phone column exists on action_tasks
+alter table public.action_tasks add column if not exists sent_to_phone boolean not null default false;
 
 -- 2) Bucket'ı gizli yap: objeler artık herkese açık URL ile okunamaz.
 update storage.buckets set public = false where name = '${bucket}';

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/gallery_cache.dart';
+import '../services/photo_image_cache.dart';
 import '../services/photo_sync_state.dart';
 import '../services/supabase_service.dart';
 
@@ -9,6 +10,7 @@ class PhotosProvider extends ChangeNotifier {
   final GalleryCache _galleryCache;
   final PhotoSyncState _syncState;
   final DateTime Function() _now;
+  final Future<void> Function() _clearImageCache;
 
   List<Photo> _photos = [];
   bool _isLoading = false;
@@ -31,16 +33,33 @@ class PhotosProvider extends ChangeNotifier {
     GalleryCache? galleryCache,
     PhotoSyncState? syncState,
     DateTime Function()? now,
+    Future<void> Function()? clearImageCache,
   })  : _service = service ?? SupabaseService(),
         _galleryCache = galleryCache ?? GalleryCache(),
         _syncState = syncState ?? PhotoSyncState(),
-        _now = now ?? DateTime.now;
+        _now = now ?? DateTime.now,
+        _clearImageCache = clearImageCache ?? PhotoImageCache.clear;
 
   List<Photo> get photos => _photos;
   bool get isLoading => _isLoading;
   bool get isRefreshing => _isRefreshing;
   String? get error => _error;
   bool get hasMore => _hasMore;
+
+  String get accountFingerprint {
+    final fingerprint = _accountFingerprint;
+    if (fingerprint == null) {
+      throw StateError('Fotoğraf önbelleği için hesap kimliği hazır değil.');
+    }
+    return fingerprint;
+  }
+
+  String cacheKeyFor(Photo photo) {
+    return photoImageCacheKey(
+      accountFingerprint: accountFingerprint,
+      storagePath: photo.storagePath,
+    );
+  }
 
   Future<void> initialize({String? accountFingerprint}) async {
     final fingerprint =
@@ -50,6 +69,7 @@ class PhotosProvider extends ChangeNotifier {
 
     final cachedFingerprint = await _galleryCache.loadFingerprint();
     if (cachedFingerprint != fingerprint) {
+      await _clearImageCache();
       await _galleryCache.clear();
       await _syncState.clear();
       await _galleryCache.saveFingerprint(fingerprint);
@@ -248,6 +268,7 @@ class PhotosProvider extends ChangeNotifier {
     _hasMore = true;
     await _syncState.clear();
     await _galleryCache.clear();
+    await _clearImageCache();
     _accountFingerprint = nextFingerprint;
     if (nextFingerprint != null) {
       await _galleryCache.saveFingerprint(nextFingerprint);

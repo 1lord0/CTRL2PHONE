@@ -111,6 +111,7 @@ void main() {
       galleryCache: cache,
       syncState: sync,
       now: () => now,
+      clearImageCache: () async {},
     );
     await provider.initialize(accountFingerprint: 'account-a');
     return provider;
@@ -152,7 +153,11 @@ void main() {
   test('duplicate merge replaces transient URL and metadata in place',
       () async {
     final service = FakeSupabaseService(now);
-    final provider = PhotosProvider(service: service, now: () => now);
+    final provider = PhotosProvider(
+      service: service,
+      now: () => now,
+      clearImageCache: () async {},
+    );
     await provider.initialize(accountFingerprint: 'account-a');
     service.pagePhotos = [
       photoAt(now, expiresAt: now.add(const Duration(hours: 6))),
@@ -174,10 +179,26 @@ void main() {
 
   test('account switch clears old gallery and sync state', () async {
     final service = FakeSupabaseService(now);
-    final provider = await seededProvider(
-      service,
-      photoAt(now, expiresAt: now.add(const Duration(hours: 6))),
+    var imageCacheClears = 0;
+    final cache = GalleryCache();
+    final sync = PhotoSyncState();
+    final photo = photoAt(
+      now,
+      expiresAt: now.add(const Duration(hours: 6)),
     );
+    await cache.saveFingerprint('account-a');
+    await cache.save([photo]);
+    await sync.save({PhotoSyncState.makeKeyFromPhoto(photo)});
+    final provider = PhotosProvider(
+      service: service,
+      galleryCache: cache,
+      syncState: sync,
+      now: () => now,
+      clearImageCache: () async {
+        imageCacheClears++;
+      },
+    );
+    await provider.initialize(accountFingerprint: 'account-a');
 
     await provider.prepareForAccount('account-b');
 
@@ -185,11 +206,16 @@ void main() {
     expect(await GalleryCache().load(), isEmpty);
     expect(await GalleryCache().loadFingerprint(), 'account-b');
     expect(await PhotoSyncState().load(), isEmpty);
+    expect(imageCacheClears, 1);
   });
 
   test('listener callback is ignored after dispose', () async {
     final service = FakeSupabaseService(now);
-    final provider = PhotosProvider(service: service, now: () => now);
+    final provider = PhotosProvider(
+      service: service,
+      now: () => now,
+      clearImageCache: () async {},
+    );
     await provider.initialize(accountFingerprint: 'account-a');
     await provider.listenForNewPhotos();
     final callback = service.bucketCallback!;

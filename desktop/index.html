@@ -15,7 +15,16 @@
       <header class="panel-chrome">
         <div class="panel-brand-wrap">
           <div class="panel-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <svg
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
@@ -23,9 +32,34 @@
           <span class="panel-brand">Ctrl2Phone</span>
         </div>
         <div class="panel-chrome-actions">
-          <button type="button" id="pinPanel" class="panel-pin no-drag" title="Sabitle" aria-pressed="false" aria-label="Sabitle">Pin</button>
-          <button type="button" id="dismissPanel" class="panel-close no-drag" data-i18n-title="label.quitApp" title="Uygulamadan çık" aria-label="Uygulamadan çık">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <button
+            type="button"
+            id="pinPanel"
+            class="panel-pin no-drag"
+            title="Sabitle"
+            aria-pressed="false"
+            aria-label="Sabitle"
+          >
+            Pin
+          </button>
+          <button
+            type="button"
+            id="dismissPanel"
+            class="panel-close no-drag"
+            data-i18n-title="label.quitApp"
+            title="Uygulamadan çık"
+            aria-label="Uygulamadan çık"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
@@ -96,7 +130,9 @@
 
           <label class="span-2 checkbox-row">
             <input type="checkbox" id="autoCopyFromPhone" checked />
-            <span data-i18n="label.autoCopy">Telefondan gelen görselleri otomatik panoya kopyala</span>
+            <span data-i18n="label.autoCopy"
+              >Telefondan gelen görselleri otomatik panoya kopyala</span
+            >
           </label>
 
           <details class="span-2 panel-details">
@@ -118,19 +154,31 @@
 
               <label class="details-field">
                 <span data-i18n="label.doublePressMs">Çift basış süresi (ms)</span>
-                <input type="number" id="doublePressMs" min="200" max="1000" step="50" value="400" />
+                <input
+                  type="number"
+                  id="doublePressMs"
+                  min="200"
+                  max="1000"
+                  step="50"
+                  value="400"
+                />
               </label>
 
               <label class="span-2 details-field">
                 <span data-i18n="label.pillVisibility">Yüzen buton</span>
                 <select id="pillVisibility">
                   <option value="always" data-i18n="opt.pillAlways">Her zaman görünür</option>
-                  <option value="background" data-i18n="opt.pillBackground">Arka planda (kısayol)</option>
-                  <option value="capture-only" data-i18n="opt.pillCaptureOnly">Sadece ekran seçiminde</option>
+                  <option value="background" data-i18n="opt.pillBackground">
+                    Arka planda (kısayol)
+                  </option>
+                  <option value="capture-only" data-i18n="opt.pillCaptureOnly">
+                    Sadece ekran seçiminde
+                  </option>
                 </select>
               </label>
               <p class="span-2 field-hint" data-i18n="hint.pillVisibility">
-                Arka plan modunda pill gizlenir; panel için Ctrl+Shift+Space kullanın. Kısayollar çalışmaya devam eder.
+                Arka plan modunda pill gizlenir; panel için Ctrl+Shift+Space kullanın. Kısayollar
+                çalışmaya devam eder.
               </p>
             </div>
           </details>
@@ -156,7 +204,9 @@
                   <option value="gemini" data-i18n="opt.aiGemini">Gemini API</option>
                   <option value="claude" data-i18n="opt.aiClaude">Claude API (Anthropic)</option>
                   <option value="openai" data-i18n="opt.aiOpenai">OpenAI API</option>
-                  <option value="custom" data-i18n="opt.aiCustom">Özel (OpenAI uyumlu / yerel)</option>
+                  <option value="custom" data-i18n="opt.aiCustom">
+                    Özel (OpenAI uyumlu / yerel)
+                  </option>
                 </select>
               </label>
 
@@ -191,7 +241,43 @@
               </label>
 
               <p class="span-2 field-hint" id="aiProviderHint" data-i18n="hint.aiProvider">
-                "Web" modunda görsel gemini.google.com'a yapıştırılır. Bir API sağlayıcı seçip anahtar girersen, seçtiğin alan API'ye gönderilir ve yanıt doğrudan burada gösterilir.
+                "Web" modunda görsel gemini.google.com'a yapıştırılır. Bir API sağlayıcı seçip
+                anahtar girersen, seçtiğin alan API'ye gönderilir ve yanıt doğrudan burada
+                gösterilir.
+              </p>
+            </div>
+          </details>
+
+          <details class="span-2 panel-details">
+            <summary>
+              <span data-i18n="label.actionSettingsHeader">n8n Action Ayarları</span>
+            </summary>
+            <div class="details-grid" onclick="event.stopPropagation()">
+              <label class="span-2">
+                <span data-i18n="label.actionWebhookUrl">n8n Action webhook adresi</span>
+                <input
+                  type="url"
+                  id="actionWebhookUrl"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="http://127.0.0.1:5678/webhook/ctrl2phone-action"
+                />
+              </label>
+
+              <label class="span-2">
+                <span data-i18n="label.actionWebhookSecret">n8n webhook gizli anahtarı</span>
+                <input
+                  type="password"
+                  id="actionWebhookSecret"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  placeholder="En az 32 karakter"
+                />
+              </label>
+
+              <p class="span-2 field-hint" data-i18n="hint.actionWebhook">
+                Bu gizli değer automation/n8n/.env içindeki CTRL2PHONE_WEBHOOK_SECRET ile aynı
+                olmalıdır.
               </p>
             </div>
           </details>
@@ -207,27 +293,81 @@
           </div>
 
           <div class="qr-block span-2">
-            <span class="qr-label" data-i18n="label.qr">Telefonda Ayarlardan QR ile Eşitlemek İçin:</span>
+            <span class="qr-label" data-i18n="label.qr"
+              >Telefonda Ayarlardan QR ile Eşitlemek İçin:</span
+            >
             <img id="qrCodeImage" class="qr-image hidden" alt="" />
+            <p id="qrPairingStatus" class="qr-pairing-status hidden"></p>
           </div>
 
           <div class="actions span-2 actions-main">
-            <button id="saveSettings" class="btn-primary btn-grow-2" data-i18n="btn.save">Ayarları Kaydet</button>
-            <button id="sendClipboard" class="btn-accent btn-grow" data-i18n="btn.sendClipboard">Telefona Gönder</button>
-            <button id="purgeStorage" class="btn-danger btn-grow" data-i18n="btn.purge">Bulutu Temizle</button>
+            <button id="saveSettings" class="btn-primary btn-grow-2" data-i18n="btn.save">
+              Ayarları Kaydet
+            </button>
+            <button id="sendClipboard" class="btn-accent btn-grow" data-i18n="btn.sendClipboard">
+              Telefona Gönder
+            </button>
+            <button id="purgeStorage" class="btn-danger btn-grow" data-i18n="btn.purge">
+              Bulutu Temizle
+            </button>
           </div>
 
           <button id="setupRls" class="span-2 btn-ghost" data-i18n="btn.setupRls">
             Güvenli Kurulum: RLS SQL kopyala ve Supabase aç
           </button>
           <p class="span-2 hint-text" data-i18n="hint.setupRls">
-            Tek seferlik: SQL panoya kopyalanır ve Supabase SQL Editör açılır → yapıştırıp <strong>Run</strong> de.
+            Tek seferlik: SQL panoya kopyalanır ve Supabase SQL Editör açılır → yapıştırıp
+            <strong>Run</strong> de.
           </p>
         </section>
 
         <div class="actions span-2 actions-quit">
-          <button id="quitApp" type="button" class="btn-quit span-2" data-i18n="btn.quit">Uygulamadan Çık</button>
+          <button id="quitApp" type="button" class="btn-quit span-2" data-i18n="btn.quit">
+            Uygulamadan Çık
+          </button>
         </div>
+
+        <section class="card action-result-card hidden" id="actionResultCard" aria-live="polite">
+          <div class="action-result-head">
+            <div>
+              <span class="action-result-eyebrow" data-i18n="label.actionResult"
+                >Action result</span
+              >
+              <h2 id="actionResultTitle">Action</h2>
+            </div>
+            <span id="actionResultStatus" class="action-status-badge">Queued</span>
+          </div>
+          <div
+            class="action-progress-track"
+            role="progressbar"
+            aria-label="Action progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            id="actionProgressTrack"
+          >
+            <div id="actionProgressBar" class="action-progress-fill"></div>
+          </div>
+          <div class="action-result-meta">
+            <span id="actionResultProgress">0%</span>
+            <span id="actionResultConfidence"></span>
+          </div>
+          <p id="actionResultSummary" class="action-result-summary"></p>
+          <div id="actionSourcesBlock" class="action-sources hidden">
+            <h3 data-i18n="label.actionSources">Sources</h3>
+            <ul id="actionSources"></ul>
+          </div>
+          <details id="actionResultDetails" class="action-result-details hidden">
+            <summary data-i18n="label.actionDetails">Structured details</summary>
+            <pre id="actionResultJson"></pre>
+          </details>
+          <button id="sendActionToPhone" class="btn-accent btn-grow hidden" style="margin-top: 12px; width: 100%;" data-i18n="btn.sendActionToPhone">
+            Telefona Gönder
+          </button>
+          <p class="action-phone-note hidden" id="actionPhoneNote" data-i18n="hint.actionPublishedToPhone">
+            This task was also published to the paired phone Tasks screen.
+          </p>
+        </section>
 
         <section class="card status-card">
           <div class="status-line">

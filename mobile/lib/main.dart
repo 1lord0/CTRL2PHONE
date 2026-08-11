@@ -3,7 +3,8 @@ import 'package:provider/provider.dart';
 import 'services/connection_settings_store.dart';
 import 'services/supabase_service.dart';
 import 'providers/photos_provider.dart';
-import 'screens/home_screen.dart';
+import 'providers/action_tasks_provider.dart';
+import 'screens/app_shell_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() async {
@@ -36,6 +37,7 @@ class PhoneApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => PhotosProvider()),
+        ChangeNotifierProvider(create: (_) => ActionTasksProvider()),
       ],
       child: MaterialApp(
         title: 'Phone Gallery',
@@ -55,7 +57,7 @@ class PhoneApp extends StatelessWidget {
           useMaterial3: true,
         ),
         home: isInitialized
-            ? const HomeScreen()
+            ? const AppShellScreen()
             : const SettingsScreen(isInitialSetup: true),
       ),
     );

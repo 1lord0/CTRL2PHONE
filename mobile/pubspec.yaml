@@ -24,12 +24,10 @@ dependencies:
 
   # Network image caching
   cached_network_image: ^3.4.1
+  flutter_cache_manager: ^3.4.1
 
   # Fullscreen zoom + swipe
   photo_view: ^0.15.0
-
-  # HTTP client
-  http: ^1.2.2
 
   # Temporary file location for gallery downloads
   path_provider: ^2.1.5

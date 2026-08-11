@@ -4,6 +4,7 @@ const overlayBridge = (window as any).bridge as import('./types').OverlayBridgeA
 const selectionBox = document.getElementById('selectionBox') as HTMLElement;
 const overlayText = document.getElementById('overlayText') as HTMLElement;
 const actionBar = document.getElementById('actionBar') as HTMLElement;
+const btnAction = document.getElementById('btnAction') as HTMLButtonElement;
 const btnGemini = document.getElementById('btnGemini') as HTMLButtonElement;
 const btnPhone = document.getElementById('btnPhone') as HTMLButtonElement;
 const btnOcr = document.getElementById('btnOcr') as HTMLButtonElement;
@@ -225,7 +226,7 @@ window.addEventListener('mousedown', (event) => {
 
   startPoint = { x: event.clientX, y: event.clientY };
   currentRect = { x: startPoint.x, y: startPoint.y, width: 0, height: 0 };
-  overlayText.textContent = 'Alanı seçin (X / Enter ile Gemini, M ile Telefon)';
+  overlayText.textContent = 'Alanı seçin (X / Enter ile Gemini, A ile Action, M ile Telefon)';
   renderSelection(currentRect);
   if (activeSessionId !== null) {
     overlayBridge.setSelection({ type: 'start', sessionId: activeSessionId });
@@ -381,14 +382,39 @@ bindOverlayAction(btnCopy, () => {
       }
     });
 });
-bindOverlayAction(btnGemini, () => {
-  if (activeSessionId !== null) overlayBridge.confirmSelectionGemini(activeSessionId);
+const ensureRectSynced = async () => {
+  if (activeSessionId !== null && currentRect) {
+    await overlayBridge.setSelection({
+      type: 'update',
+      rect: currentRect,
+      sessionId: activeSessionId,
+    });
+  }
+};
+
+bindOverlayAction(btnGemini, async () => {
+  if (activeSessionId !== null) {
+    await ensureRectSynced();
+    overlayBridge.confirmSelectionGemini(activeSessionId);
+  }
 });
-bindOverlayAction(btnPhone, () => {
-  if (activeSessionId !== null) overlayBridge.confirmSelectionPhone(activeSessionId);
+bindOverlayAction(btnAction, async () => {
+  if (activeSessionId !== null) {
+    await ensureRectSynced();
+    overlayBridge.confirmSelectionAction(activeSessionId);
+  }
 });
-bindOverlayAction(btnOcr, () => {
-  if (activeSessionId !== null) overlayBridge.confirmSelectionOcr(activeSessionId);
+bindOverlayAction(btnPhone, async () => {
+  if (activeSessionId !== null) {
+    await ensureRectSynced();
+    overlayBridge.confirmSelectionPhone(activeSessionId);
+  }
+});
+bindOverlayAction(btnOcr, async () => {
+  if (activeSessionId !== null) {
+    await ensureRectSynced();
+    overlayBridge.confirmSelectionOcr(activeSessionId);
+  }
 });
 bindOverlayAction(btnCancel, () => {
   if (activeSessionId !== null) overlayBridge.cancelSelection(activeSessionId);
@@ -403,15 +429,34 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (!currentRect) return;
-  if (e.key === 'x' || e.key === 'X' || e.key === 'Enter') {
+  if (e.key === 'a' || e.key === 'A') {
     e.preventDefault();
-    if (activeSessionId !== null) overlayBridge.confirmSelectionGemini(activeSessionId);
+    if (activeSessionId !== null) {
+      void ensureRectSynced().then(() => {
+        if (activeSessionId !== null) overlayBridge.confirmSelectionAction(activeSessionId);
+      });
+    }
+  } else if (e.key === 'x' || e.key === 'X' || e.key === 'Enter') {
+    e.preventDefault();
+    if (activeSessionId !== null) {
+      void ensureRectSynced().then(() => {
+        if (activeSessionId !== null) overlayBridge.confirmSelectionGemini(activeSessionId);
+      });
+    }
   } else if (e.key === 'm' || e.key === 'M') {
     e.preventDefault();
-    if (activeSessionId !== null) overlayBridge.confirmSelectionPhone(activeSessionId);
+    if (activeSessionId !== null) {
+      void ensureRectSynced().then(() => {
+        if (activeSessionId !== null) overlayBridge.confirmSelectionPhone(activeSessionId);
+      });
+    }
   } else if (e.key === 'c' || e.key === 'C') {
     e.preventDefault();
-    if (activeSessionId !== null) overlayBridge.confirmSelectionOcr(activeSessionId);
+    if (activeSessionId !== null) {
+      void ensureRectSynced().then(() => {
+        if (activeSessionId !== null) overlayBridge.confirmSelectionOcr(activeSessionId);
+      });
+    }
   }
 });
 

@@ -1,0 +1,23 @@
+{
+  "name": "ctrl2phone-n8n-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned local n8n runtime and validation tools for Ctrl2Phone action workflows.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22"
+  },
+  "scripts": {
+    "build:workflows": "node --env-file-if-exists=.env scripts/build-workflows.mjs",
+    "start": "node --env-file-if-exists=.env scripts/start.mjs",
+    "validate": "node --env-file-if-exists=.env scripts/validate.mjs",
+    "validate:workflows": "node --env-file-if-exists=.env scripts/validate-workflows.mjs",
+    "healthcheck": "node --env-file-if-exists=.env scripts/healthcheck.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "e2e": "node --env-file-if-exists=.env scripts/e2e.mjs",
+    "test": "node --env-file-if-exists=.env --test"
+  },
+  "dependencies": {
+    "n8n": "2.33.6"
+  }
+}

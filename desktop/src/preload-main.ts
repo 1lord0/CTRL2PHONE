@@ -16,6 +16,7 @@ const bridge: MainBridgeAPI = {
   panelInteractStart: () => ipcRenderer.invoke('panel-interact-start'),
   panelDragBy: (dx, dy) => ipcRenderer.invoke('panel-drag-by', dx, dy),
   panelDismiss: () => ipcRenderer.invoke('panel-dismiss'),
+  sendActionToPhone: (taskId) => ipcRenderer.invoke('panel-send-action-to-phone', taskId),
   quitApp: () => ipcRenderer.invoke('app-quit'),
   savePanelPinned: (pinned) => ipcRenderer.invoke('panel-save-pinned', pinned),
   panelResizeCompact: (size) => ipcRenderer.invoke('panel-resize-compact', size),
@@ -26,6 +27,8 @@ const bridge: MainBridgeAPI = {
   onPillResized: (callback) => ipcRenderer.on('pill-resized', (_, size) => callback(size)),
   onStatus: (callback) => ipcRenderer.on('status', (_, message) => callback(message)),
   onResponse: (callback) => ipcRenderer.on('response', (_, message) => callback(message)),
+  onActionTaskUpdated: (callback) =>
+    ipcRenderer.on('action-task-updated', (_, task) => callback(task)),
   onOverlayMessage: (callback) =>
     ipcRenderer.on('overlay-message', (_, message) => callback(message)),
   uploadFileToPhone: (filePath) => ipcRenderer.invoke('upload-file-to-phone', filePath),

@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/photos_provider.dart';
+import '../providers/action_tasks_provider.dart';
 import '../services/connection_settings_store.dart';
 import '../services/supabase_service.dart';
 import '../services/qr_payload.dart';
-import 'home_screen.dart';
+import 'app_shell_screen.dart';
 import 'qr_scanner_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -22,6 +23,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _keyController = TextEditingController();
   final _bucketController = TextEditingController();
   bool _isLoading = false;
+  ActionPairingPayload? _pendingActionPairing;
+  String? _pendingPairingUrl;
+  String? _pendingPairingKey;
+  String? _pendingPairingBucket;
 
   @override
   void initState() {
@@ -67,15 +72,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
           settings.url, settings.anonKey, settings.bucket);
       await provider.initialize(accountFingerprint: settings.fingerprint);
 
+      if (!mounted) return;
+      final actionProvider = context.read<ActionTasksProvider>();
+      final pairingMatchesCurrentSettings = _pendingActionPairing != null &&
+          _pendingPairingUrl == url &&
+          _pendingPairingKey == key &&
+          _pendingPairingBucket == bucket;
+      await actionProvider.initialize(
+        settings,
+        pairing: pairingMatchesCurrentSettings ? _pendingActionPairing : null,
+      );
+      final pairingFailed = pairingMatchesCurrentSettings &&
+          actionProvider.channelId != _pendingActionPairing!.channelId;
+      if (!pairingFailed) _pendingActionPairing = null;
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ayarlar başarıyla kaydedildi!')),
+          SnackBar(
+            content: Text(pairingFailed
+                ? 'Fotoğraf ayarları kaydedildi; görev eşleşmesi başarısız: ${actionProvider.errorMessage}'
+                : 'Ayarlar başarıyla kaydedildi!'),
+            backgroundColor: pairingFailed ? Colors.orange : null,
+          ),
         );
 
         if (widget.isInitialSetup) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
+            MaterialPageRoute(builder: (_) => const AppShellScreen()),
           );
         } else {
           Navigator.pop(
@@ -168,6 +192,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _urlController.text = parsed.url;
                       _keyController.text = parsed.key;
                       _bucketController.text = parsed.bucket;
+                      _pendingActionPairing = parsed.actionPairing;
+                      _pendingPairingUrl = parsed.url;
+                      _pendingPairingKey = parsed.key;
+                      _pendingPairingBucket = parsed.bucket;
                     });
                     messenger.showSnackBar(
                       const SnackBar(

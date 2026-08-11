@@ -5,30 +5,19 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-class KeyListener
+class KeyListener : Form
 {
-    private const int WH_KEYBOARD_LL = 13;
-    private const int WM_KEYDOWN = 0x0100;
-    private const int WM_KEYUP = 0x0101;
-    private const int WM_SYSKEYDOWN = 0x0104;
-    private const int WM_SYSKEYUP = 0x0105;
+    private const int WM_INPUT = 0x00FF;
+    private const int RID_INPUT = 0x10000003;
+    private const int RIM_TYPEKEYBOARD = 1;
+
+    private const ushort HID_USAGE_PAGE_GENERIC = 0x01;
+    private const ushort HID_USAGE_KEYBOARD = 0x06;
+    private const uint RIDEV_INPUTSINK = 0x00000100;
 
     private const int VK_LCONTROL = 0xA2;
     private const int VK_RCONTROL = 0xA3;
-    private const int VK_LSHIFT = 0xA0;
-    private const int VK_RSHIFT = 0xA1;
-    private const int VK_V = 0x56;
-    private const int VK_X = 0x58;
-    private const int VK_ESCAPE = 0x1B;
-    private const int VK_RETURN = 0x0D;
-    private const int VK_M = 0x4D;
-    private const int VK_C = 0x43;
-    private const int VK_F = 0x46;
-    private const int VK_Q = 0x51;
-    private const int VK_SPACE = 0x20;
-
-    private static LowLevelKeyboardProc _proc = HookCallback;
-    private static IntPtr _hookID = IntPtr.Zero;
+    private const int VK_CONTROL = 0x11;
 
     private static readonly Stopwatch _clock = Stopwatch.StartNew();
     private const long NoPress = -1;
@@ -38,12 +27,10 @@ class KeyListener
 
     private static volatile bool _selectionActive = false;
     private static volatile bool _panelOpen = false;
-    private static volatile bool _ctrlHeld = false;
-    private static volatile bool _shiftHeld = false;
-    private static long _selectionActiveSinceMs = 0;
-    private const long SelectionMaxMs = 60000;
 
-    // Never write to stdout inside the hook — it blocks the global input chain (mouse lag).
+    private static volatile bool _ctrlDown = false;
+    private static volatile bool _shiftDown = false;
+
     private static readonly ConcurrentQueue<string> _outbox = new ConcurrentQueue<string>();
     private static readonly AutoResetEvent _outboxSignal = new AutoResetEvent(false);
 
@@ -53,6 +40,157 @@ class KeyListener
         _outboxSignal.Set();
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWINPUTDEVICE
+    {
+        public ushort usUsagePage;
+        public ushort usUsage;
+        public uint dwFlags;
+        public IntPtr hwndTarget;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWINPUTHEADER
+    {
+        public uint dwType;
+        public uint dwSize;
+        public IntPtr hDevice;
+        public IntPtr wParam;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWKEYBOARD
+    {
+        public ushort MakeCode;
+        public ushort Flags;
+        public ushort Reserved;
+        public ushort VKey;
+        public uint Message;
+        public uint ExtraInformation;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWINPUT
+    {
+        public RAWINPUTHEADER header;
+        public RAWKEYBOARD keyboard;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, out RAWINPUT pData, ref uint pcbSize, uint cbSizeHeader);
+
+    public KeyListener()
+    {
+        this.WindowState = FormWindowState.Minimized;
+        this.ShowInTaskbar = false;
+        this.FormBorderStyle = FormBorderStyle.None;
+        this.Size = new System.Drawing.Size(0, 0);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        RAWINPUTDEVICE[] rid = new RAWINPUTDEVICE[1];
+        rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+        rid[0].usUsage = HID_USAGE_KEYBOARD;
+        rid[0].dwFlags = RIDEV_INPUTSINK;
+        rid[0].hwndTarget = this.Handle;
+
+        if (RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE))))
+        {
+            Emit("READY");
+        }
+        else
+        {
+            Emit("HOOK_FAILED:" + Marshal.GetLastWin32Error());
+        }
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_INPUT)
+        {
+            uint dwSize = 0;
+            RAWINPUT dummyInput;
+            GetRawInputData(m.LParam, RID_INPUT, out dummyInput, ref dwSize, (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER)));
+
+            if (dwSize > 0)
+            {
+                RAWINPUT raw;
+                if (GetRawInputData(m.LParam, RID_INPUT, out raw, ref dwSize, (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER))) == dwSize)
+                {
+                    if (raw.header.dwType == RIM_TYPEKEYBOARD)
+                    {
+                        ushort vkey = raw.keyboard.VKey;
+                        bool isUp = (raw.keyboard.Flags & 1) != 0;
+                        bool isE0 = (raw.keyboard.Flags & 2) != 0;
+
+                        int vkCode = vkey;
+                        if (vkey == VK_CONTROL)
+                        {
+                            vkCode = isE0 ? VK_RCONTROL : VK_LCONTROL;
+                        }
+
+                        if (vkey == VK_CONTROL || vkey == VK_LCONTROL || vkey == VK_RCONTROL)
+                        {
+                            _ctrlDown = !isUp;
+                        }
+                        else if (vkey == 0x10 || vkey == 0xA0 || vkey == 0xA1) // VK_SHIFT, LSHIFT, RSHIFT
+                        {
+                            _shiftDown = !isUp;
+                        }
+
+                        int triggerVk = _triggerVk;
+                        int thresholdMs = _thresholdMs;
+
+                        if (vkCode == triggerVk && isUp)
+                        {
+                            long now = _clock.ElapsedMilliseconds;
+                            long delta = _lastPressMs != NoPress ? now - _lastPressMs : -1;
+                            if (_lastPressMs != NoPress && delta <= thresholdMs)
+                            {
+                                Emit("DOUBLE_CTRL");
+                                _lastPressMs = NoPress;
+                            }
+                            else
+                            {
+                                _lastPressMs = now;
+                            }
+                        }
+                        
+                        if (!isUp) // Key Down events
+                        {
+                            if (_ctrlDown && _shiftDown && vkey == 0x56) // V
+                            {
+                                Emit("CTRL_SHIFT_V");
+                            }
+                            else if (_ctrlDown && _shiftDown && vkey == 0x20) // Space
+                            {
+                                Emit("CTRL_SHIFT_SPACE");
+                            }
+
+                            if (_selectionActive)
+                            {
+                                if (vkey == 0x41) Emit("KEY_A");
+                                else if (vkey == 0x58) Emit("KEY_X");
+                                else if (vkey == 0x4D) Emit("KEY_M");
+                                else if (vkey == 0x43) Emit("KEY_C");
+                                else if (vkey == 0x51) Emit("KEY_Q");
+                                else if (vkey == 0x0D) Emit("KEY_RETURN");
+                                else if (vkey == 0x1B) Emit("KEY_ESCAPE");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        base.WndProc(ref m);
+    }
+
+    [STAThread]
     public static void Main()
     {
         Thread outboxThread = new Thread(() =>
@@ -88,20 +226,11 @@ class KeyListener
                     line = line.Trim().ToUpper();
                     if (line == "ACTIVE")
                     {
-                        _selectionActiveSinceMs = _clock.ElapsedMilliseconds;
                         _selectionActive = true;
                     }
                     else if (line == "INACTIVE")
                     {
                         _selectionActive = false;
-                    }
-                    else if (line == "PANEL_OPEN")
-                    {
-                        _panelOpen = true;
-                    }
-                    else if (line == "PANEL_CLOSED")
-                    {
-                        _panelOpen = false;
                     }
                     else if (line.StartsWith("CONFIG:"))
                     {
@@ -128,132 +257,6 @@ class KeyListener
         stdinWatcher.IsBackground = true;
         stdinWatcher.Start();
 
-        _hookID = SetHook(_proc);
-        if (_hookID != IntPtr.Zero)
-        {
-            Emit("READY");
-        }
-        else
-        {
-            Emit("HOOK_FAILED");
-        }
-        Application.Run();
-        UnhookWindowsHookEx(_hookID);
+        Application.Run(new KeyListener());
     }
-
-    private static IntPtr SetHook(LowLevelKeyboardProc proc)
-    {
-        return SetWindowsHookEx(WH_KEYBOARD_LL, proc, IntPtr.Zero, 0);
-    }
-
-    private delegate IntPtr LowLevelKeyboardProc(
-        int nCode, IntPtr wParam, IntPtr lParam);
-
-    private static IntPtr HookCallback(
-        int nCode, IntPtr wParam, IntPtr lParam)
-    {
-        if (nCode < 0)
-        {
-            return CallNextHookEx(_hookID, nCode, wParam, lParam);
-        }
-
-        try
-        {
-            int vkCode = Marshal.ReadInt32(lParam);
-            int triggerVk = _triggerVk;
-            int thresholdMs = _thresholdMs;
-            bool isKeyUp = wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP;
-            bool isKeyDown = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
-
-            if (vkCode == VK_LCONTROL || vkCode == VK_RCONTROL)
-            {
-                _ctrlHeld = isKeyDown;
-            }
-            else if (vkCode == VK_LSHIFT || vkCode == VK_RSHIFT)
-            {
-                _shiftHeld = isKeyDown;
-            }
-
-            if (_selectionActive)
-            {
-                if (_clock.ElapsedMilliseconds - _selectionActiveSinceMs > SelectionMaxMs)
-                {
-                    _selectionActive = false;
-                }
-                else if (vkCode == VK_X || vkCode == VK_M || vkCode == VK_C ||
-                         vkCode == VK_ESCAPE || vkCode == VK_RETURN || vkCode == VK_Q)
-                {
-                    if (isKeyUp)
-                    {
-                        if (vkCode == VK_X) Emit("KEY_X");
-                        else if (vkCode == VK_M) Emit("KEY_M");
-                        else if (vkCode == VK_C) Emit("KEY_C");
-                        else if (vkCode == VK_ESCAPE) Emit("KEY_ESCAPE");
-                        else if (vkCode == VK_RETURN) Emit("KEY_RETURN");
-                        else if (vkCode == VK_Q) Emit("KEY_Q");
-                    }
-                    return (IntPtr)1;
-                }
-            }
-
-            if (isKeyDown && _ctrlHeld && _shiftHeld)
-            {
-                if (vkCode == VK_V)
-                {
-                    Emit("CTRL_SHIFT_V");
-                    return (IntPtr)1;
-                }
-                if (vkCode == VK_SPACE)
-                {
-                    Emit("CTRL_SHIFT_SPACE");
-                    return (IntPtr)1;
-                }
-            }
-
-            if (!_selectionActive && _panelOpen && vkCode == VK_ESCAPE && isKeyUp)
-            {
-                Emit("SPOTLIGHT_DISMISS");
-                return (IntPtr)1;
-            }
-
-            if (isKeyDown && vkCode != triggerVk)
-            {
-                _lastPressMs = NoPress;
-            }
-
-            if (vkCode == triggerVk && isKeyUp)
-            {
-                long now = _clock.ElapsedMilliseconds;
-                if (_lastPressMs != NoPress && now - _lastPressMs <= thresholdMs)
-                {
-                    Emit("DOUBLE_CTRL");
-                    _lastPressMs = NoPress;
-                }
-                else
-                {
-                    _lastPressMs = now;
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        return CallNextHookEx(_hookID, nCode, wParam, lParam);
-    }
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern IntPtr SetWindowsHookEx(int idHook,
-        LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode,
-        IntPtr wParam, IntPtr lParam);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern IntPtr GetModuleHandle(string lpModuleName);
 }
